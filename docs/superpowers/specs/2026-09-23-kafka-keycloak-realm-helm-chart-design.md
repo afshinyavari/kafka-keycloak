@@ -122,15 +122,18 @@ roles:
     topic: [Describe, DescribeConfigs, Read]
     group: [Describe, Read]
 
-teams:
-  - name: orders
+ownership:
+  role: topic-owner                     # vad "äga" innebär i denna miljö; prod sätter topic-reader
+
+teams:                                  # map, så att values-filer kan slås ihop
+  orders:
     description: Team Orders
-    adGroups: ["AD-Kafka-Orders-Dev"]
-    grants:
-      - role: topic-owner
-        topics: ["orders.*"]
-        consumerGroups: ["orders.*"]
-        transactionalIds: ["orders.*"]
+    adGroups: ["AD-Kafka-Orders"]
+    owns:
+      topics: ["orders.*"]
+      consumerGroups: ["orders.*"]
+      transactionalIds: ["orders.*"]
+    grants:                             # undantag utöver ägandet
       - role: topic-reader
         topics: ["reference.*"]
 
@@ -184,9 +187,19 @@ Regler för modellen:
 - Resursmönster skickas vidare oförändrade till Keycloak och följer Strimzis
   semantik: ett avslutande `*` betyder prefix, `*` ensamt matchar allt, annars
   exakt namn. `orders.*` blir alltså `Topic:orders.*`.
-- `teams[].name` måste vara unikt och ett giltigt gruppnamn. `grants[].role`
-  måste referera en nyckel i `roles`. Charten validerar detta med
-  `values.schema.json` och `fail` i mallarna.
+- `teams` är en map där nyckeln är teamets namn. Maps slås ihop mellan
+  values-filer, så en gemensam `values-teams.yaml` kan hålla alla team medan
+  miljöfilen bara anger det som skiljer. Nyckeln måste vara ett giltigt
+  gruppnamn.
+- `owns` beskriver vad teamet äger. Vilken rollprofil ägande ger avgörs av
+  `ownership.role`, som sätts per miljö: `topic-owner` i dev, `topic-reader`
+  i prod där bara mTLS-tjänsterna skriver. Rollprofilerna själva betyder
+  alltid samma sak. Internt behandlas `owns` som en grant med
+  `role: <ownership.role>` och läggs först i teamets grants.
+- `grants` är undantag utöver ägandet, till exempel läsrätt på ett annat
+  teams topics, eller ett enskilt team som ska få skriva i prod.
+- `grants[].role` och `ownership.role` måste referera en nyckel i `roles`.
+  Charten validerar detta med `values.schema.json` och `fail` i mallarna.
 - Rollprofiler får ha nycklarna `topic`, `group`, `transactionalId` och
   `cluster`. En grant använder bara de nycklar som den listar resurser för.
 - `extraRealm` slås ihop sist med `mergeOverwrite`. Listor ersätts, de slås
@@ -281,7 +294,8 @@ Cluster admins ger resurserna `Cluster:*`, `Topic:*`, `Group:*` och
 `config.groups` som JSON-sträng `[{"path":"/<parent>/<team>","extendChildren":false}]`.
 Cluster admins får `team:cluster-admins`.
 
-**Permissions.** En scope-permission per team, grant och resurs:
+**Permissions.** En scope-permission per team, grant och resurs, där
+`owns` räknas som teamets första grant med rollen `ownership.role`:
 
 ```yaml
 name: "<team> / <roll> / <resursnamn>"
@@ -405,7 +419,9 @@ charts/kafka-keycloak-realm/
     NOTES.txt
   tests/                  # helm-unittest
 examples/
-  values-dev.yaml
+  values-teams.yaml      # gemensam teamdefinition
+  values-dev.yaml        # ownership.role: topic-owner
+  values-prod.yaml       # ownership.role: topic-reader
 test/
   realm/                  # yq-baserade tester av realm-innehållet
   integration/            # lokal Keycloak i podman
@@ -458,7 +474,12 @@ strukturella påståenden med `yq`. Exempel på fall:
 
 - två team som refererar samma topic ger en resurs men två permissions
 - ett team med två AD-grupper ger två mappers mot samma grupp
-- ett team utan grants ger grupp, mapper och policy men inga permissions
+- ett team utan `owns` och utan grants ger grupp, mapper och policy men inga
+  permissions
+- samma team-map med `ownership.role: topic-owner` respektive `topic-reader`
+  ger samma resurser men olika scopes i permissions
+- två values-filer (gemensam teams-fil plus miljöfil) slås ihop så att teamen
+  från basfilen finns kvar
 - `clusterAdmins` tom ger ingen `cluster-admins`-grupp eller wildcard-resurser
 - `externalClients` ger stubbar med enbart `clientId`
 - `kafka.clusterName` satt ger prefixade resursnamn
@@ -507,3 +528,6 @@ Detta test körs manuellt eller i CI där podman finns, inte vid varje
   för `no-delete`, så att borttagna klienter i git faktiskt försvinner.
 - Jobbet är en ArgoCD PostSync-hook som standard, med fristående läge som
   alternativ.
+- Team är en map och ägande är ett eget begrepp (`owns` plus
+  `ownership.role`), så att teamdefinitionen är identisk i alla miljöer och
+  skillnaden mellan dev och prod är en rad i miljöfilen.
