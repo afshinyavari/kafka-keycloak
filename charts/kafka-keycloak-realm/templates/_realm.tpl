@@ -11,7 +11,8 @@ Builds the realm representation as a dict and renders it as YAML.
 {{- $_ := set $realm "identityProviders" (include "kafka-keycloak-realm.identityProviders" . | fromYamlArray) -}}
 {{- $_ := set $realm "identityProviderMappers" (include "kafka-keycloak-realm.identityProviderMappers" . | fromYamlArray) -}}
 {{- end -}}
-{{- $clients := list (include "kafka-keycloak-realm.kafkaClient" . | fromYaml) -}}
-{{- $_ := set $realm "clients" $clients -}}
+{{- $_ := set $realm "clientScopes" (list (include "kafka-keycloak-realm.groupsClientScope" . | fromYaml)) -}}
+{{- $_ := set $realm "clients" (include "kafka-keycloak-realm.clients" . | fromYamlArray) -}}
+{{- $realm = mergeOverwrite $realm (deepCopy (.Values.extraRealm | default dict)) -}}
 {{- toYaml $realm -}}
 {{- end -}}

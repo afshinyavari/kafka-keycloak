@@ -89,3 +89,29 @@ roles:
 # production, where only mTLS services write.
 ownership:
   role: topic-owner
+
+# -- Simple OIDC clients for GUIs (Kafka UI, Schema Registry, ...). They get the
+# kafka-groups client scope so the user's groups end up in the token.
+# - name: kafka-ui
+#   redirectUris: ["https://kafka-ui.apps.example.com/*"]
+#   secretEnv: KAFKA_UI_CLIENT_SECRET   # omit for a public client
+#   serviceAccount: false
+#   attributes: {}                       # raw client attributes
+#   extra: {}                            # raw client config merged last
+clients: []
+
+# -- The groups claim added by the kafka-groups client scope.
+groupsClaim:
+  name: groups
+  # -- false gives "orders", true gives "/kafka/orders".
+  fullPath: false
+  # -- Also expose the raw AD group names (identityProvider.userAttribute) as a claim.
+  includeAdAttribute: false
+  adAttributeClaim: ad-groups
+
+# -- Clients owned by someone else (the admin client from the Keycloak team).
+# Rendered as bare stubs so import.managed.client=full leaves them untouched.
+externalClients: []
+
+# -- Raw realm representation merged last (mergeOverwrite: lists replace).
+extraRealm: {}
