@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kafka-keycloak-realm values",
+  "type": "object",
+  "$defs": {
+    "stringList": { "type": "array", "items": { "type": "string" } },
+    "resourceSelection": {
+      "topics": { "$ref": "#/$defs/stringList" },
+      "consumerGroups": { "$ref": "#/$defs/stringList" },
+      "transactionalIds": { "$ref": "#/$defs/stringList" }
+    },
+    "grant": {
+      "type": "object",
+      "required": ["role"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "topics": { "$ref": "#/$defs/stringList" },
+        "consumerGroups": { "$ref": "#/$defs/stringList" },
+        "transactionalIds": { "$ref": "#/$defs/stringList" },
+        "cluster": { "type": "boolean" }
+      }
+    },
+    "team": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "adGroups": { "$ref": "#/$defs/stringList" },
+        "owns": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "topics": { "$ref": "#/$defs/stringList" },
+            "consumerGroups": { "$ref": "#/$defs/stringList" },
+            "transactionalIds": { "$ref": "#/$defs/stringList" }
+          }
+        },
+        "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" } }
+      }
+    },
+    "roleProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topic": { "$ref": "#/$defs/stringList" },
+        "group": { "$ref": "#/$defs/stringList" },
+        "transactionalId": { "$ref": "#/$defs/stringList" },
+        "cluster": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "simpleClient": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "redirectUris": { "$ref": "#/$defs/stringList" },
+        "secretEnv": { "type": "string" },
+        "serviceAccount": { "type": "boolean" },
+        "attributes": { "type": "object" },
+        "extra": { "type": "object" }
+      }
+    }
+  },
+  "properties": {
+    "keycloak": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "loginRealm": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "secretKeys": {
+          "type": "object",
+          "properties": { "clientId": { "type": "string" }, "clientSecret": { "type": "string" } }
+        },
+        "sslVerify": { "type": "boolean" },
+        "caBundleConfigMap": { "type": "string" },
+        "caBundleKey": { "type": "string" }
+      }
+    },
+    "realm": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "displayName": { "type": "string" },
+        "settings": { "type": "object" }
+      }
+    },
+    "identityProvider": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "alias": { "type": "string" },
+        "providerId": { "type": "string", "enum": ["oidc", "saml"] },
+        "displayName": { "type": "string" },
+        "groupsAttribute": { "type": "string" },
+        "groupsAttributeFriendlyName": { "type": "string" },
+        "userAttribute": { "type": "string" },
+        "syncMode": { "type": "string", "enum": ["IMPORT", "LEGACY", "FORCE", "INHERIT"] },
+        "config": { "type": "object" },
+        "extraMappers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "identityProviderMapper"],
+            "properties": {
+              "name": { "type": "string" },
+              "identityProviderMapper": { "type": "string" },
+              "config": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "kafka": {
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "clusterName": { "type": "string" },
+        "secretEnv": { "type": "string" },
+        "scopes": { "$ref": "#/$defs/stringList" },
+        "decisionStrategy": { "type": "string", "enum": ["AFFIRMATIVE", "UNANIMOUS", "CONSENSUS"] }
+      }
+    },
+    "groups": {
+      "type": "object",
+      "properties": { "parent": { "type": "string", "minLength": 1 } }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/roleProfile" }
+    },
+    "ownership": {
+      "type": "object",
+      "properties": { "role": { "type": "string", "minLength": 1 } }
+    },
+    "teams": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/team" }
+    },
+    "clusterAdmins": {
+      "type": "object",
+      "properties": { "adGroups": { "$ref": "#/$defs/stringList" } }
+    },
+    "clients": { "type": "array", "items": { "$ref": "#/$defs/simpleClient" } },
+    "clientDefaults": {
+      "type": "object",
+      "properties": { "scopes": { "$ref": "#/$defs/stringList" } }
+    },
+    "groupsClaim": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "fullPath": { "type": "boolean" },
+        "includeAdAttribute": { "type": "boolean" },
+        "adAttributeClaim": { "type": "string" }
+      }
+    },
+    "externalClients": { "$ref": "#/$defs/stringList" },
+    "extraRealm": { "type": "object" },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "type": "array" },
+    "job": {
+      "type": "object",
+      "properties": {
+        "argocdHook": { "type": "boolean" },
+        "hookDeletePolicy": { "type": "string" },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "envFrom": { "$ref": "#/$defs/stringList" },
+        "env": { "type": "array" },
+        "importManaged": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "enum": ["full", "no-delete"] }
+        },
+        "logLevel": { "type": "string" },
+        "resources": { "type": "object" },
+        "podSecurityContext": { "type": "object" },
+        "securityContext": { "type": "object" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" },
+        "podAnnotations": { "type": "object" }
+      }
+    }
+  }
+}
