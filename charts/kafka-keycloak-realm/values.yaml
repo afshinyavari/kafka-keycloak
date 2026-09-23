@@ -1,0 +1,91 @@
+# -- Keycloak connection for keycloak-config-cli.
+keycloak:
+  # -- Base URL of Keycloak (required).
+  url: ""
+  # -- Realm to log in to. Defaults to realm.name (the admin client lives in our own realm).
+  loginRealm: ""
+  # -- Existing Secret holding the admin client's credentials (required).
+  existingSecret: ""
+  secretKeys:
+    clientId: clientId
+    clientSecret: clientSecret
+
+# -- The realm this release manages.
+realm:
+  # -- Realm name (required).
+  name: ""
+  displayName: ""
+  # -- Raw realm-level settings merged into the realm representation.
+  settings: {}
+
+# -- Keycloak groups. Teams become subgroups of the parent: /<parent>/<team>.
+groups:
+  parent: kafka
+
+# -- Teams, keyed by name. Maps merge across values files, so a shared teams
+# file can be combined with per-environment overrides.
+# orders:
+#   description: Team Orders
+#   adGroups: ["AD-Kafka-Orders"]
+#   owns:
+#     topics: ["orders.*"]
+#     consumerGroups: ["orders.*"]
+#     transactionalIds: []
+#   grants:
+#     - role: topic-reader
+#       topics: ["reference.*"]
+teams: {}
+
+# -- People with full rights on the cluster. Empty adGroups disables it.
+clusterAdmins:
+  adGroups: []
+
+# -- ADFS identity provider. The chart owns the provider and ALL its mappers
+# (managed "full"), so existing mappers must be listed under extraMappers.
+identityProvider:
+  enabled: true
+  alias: adfs
+  # -- oidc or saml. ADFS is federated as OIDC in our realm.
+  providerId: oidc
+  displayName: ADFS
+  # -- OIDC claim (or SAML attribute name) that carries the AD group names.
+  groupsAttribute: groups
+  # -- SAML only: use the attribute's friendly name instead of its name.
+  groupsAttributeFriendlyName: ""
+  # -- Keycloak user attribute the AD groups are imported into.
+  userAttribute: groups
+  syncMode: FORCE
+  # -- Raw provider config (authorizationUrl, tokenUrl, clientId, ...).
+  # Secrets go in as $(env:NAME) and are substituted at import time.
+  config: {}
+  # -- Additional mappers rendered as-is, e.g. the existing email, firstName,
+  # lastName and username template mappers. identityProviderAlias is filled in.
+  extraMappers: []
+
+# -- The Kafka broker client that Strimzi's KeycloakAuthorizer uses.
+kafka:
+  clientId: kafka
+  # -- Optional Strimzi cluster name. When set, resources are named
+  # "kafka-cluster:<name>,Topic:<pattern>" so several clusters can share a realm.
+  clusterName: ""
+  # -- Environment variable (in the Job) holding the client secret.
+  secretEnv: KAFKA_CLIENT_SECRET
+  # -- Authorization scopes, as expected by Strimzi's KeycloakAuthorizer.
+  scopes: [Create, Read, Write, Delete, Alter, Describe, ClusterAction, DescribeConfigs, AlterConfigs, IdempotentWrite]
+  decisionStrategy: AFFIRMATIVE
+
+# -- Reusable role profiles: Kafka scopes per resource type.
+# Keys: topic, group, transactionalId, cluster.
+roles:
+  topic-owner:
+    topic: [Describe, DescribeConfigs, Read, Write, Create, Delete, Alter, AlterConfigs]
+    group: [Describe, Read, Delete]
+    transactionalId: [Describe, Write]
+  topic-reader:
+    topic: [Describe, DescribeConfigs, Read]
+    group: [Describe, Read]
+
+# -- What "owning" a topic means in this environment. Set topic-reader in
+# production, where only mTLS services write.
+ownership:
+  role: topic-owner

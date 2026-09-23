@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kafka-keycloak-realm
+description: >-
+  GitOps-managed Keycloak realm for Strimzi/Kafka: teams, groups, ADFS identity
+  provider mappers and Keycloak Authorization Services on the kafka client,
+  applied with keycloak-config-cli.
+type: application
+version: 0.1.0
+appVersion: "6.5.1"
+keywords: [kafka, strimzi, keycloak, keycloak-config-cli, gitops]
