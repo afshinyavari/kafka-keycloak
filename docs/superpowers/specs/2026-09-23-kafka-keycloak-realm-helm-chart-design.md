@@ -95,13 +95,29 @@ externalClients:
 identityProvider:
   enabled: true
   alias: adfs
-  providerId: saml                      # saml | oidc
+  providerId: oidc                      # oidc | saml; ADFS körs som OIDC hos oss
   displayName: ADFS
-  groupsAttribute: groups               # SAML-attributets namn (eller OIDC-claim) med AD-grupper
-  groupsAttributeFriendlyName: ""       # valfritt; SAML friendly name om den befintliga mappern använder det
+  groupsAttribute: groups               # OIDC-claim (eller SAML-attribut) med AD-grupper
+  groupsAttributeFriendlyName: ""       # bara SAML: friendly name om mappern använder det
   userAttribute: groups                 # user-attribut i Keycloak att spara dem i
   syncMode: FORCE
-  config: {}                            # rå IdP-config: singleSignOnServiceUrl, signingCertificate, entityId ...
+  config:                               # rå IdP-config; hemligheter som $(env:...)
+    authorizationUrl: https://adfs.example.com/adfs/oauth2/authorize
+    tokenUrl: https://adfs.example.com/adfs/oauth2/token
+    clientId: kafka-keycloak
+    clientSecret: $(env:ADFS_CLIENT_SECRET)
+  extraMappers:                         # befintliga mappers kopieras hit, t.ex. email, firstName, lastName, username
+    - name: email
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config:
+        syncMode: FORCE
+        claim: email
+        user.attribute: email
+    - name: username
+      identityProviderMapper: oidc-username-idp-mapper
+      config:
+        syncMode: FORCE
+        template: "${CLAIM.upn}"
 
 kafka:
   clientId: kafka
@@ -233,7 +249,8 @@ Attributet `description` sätts från teamets beskrivning.
 `displayName`, `enabled: true`, `config.syncMode` och `identityProvider.config`
 råa nycklar. Hemligheter i `config` anges av användaren som `$(env:NAMN)`.
 
-`identityProviderMappers` innehåller:
+`identityProviderMappers` hanteras med `full`, så allt som ska finnas på
+providern måste renderas av charten. Listan innehåller:
 
 1. **Attribute importer** som sparar alla AD-grupper som user-attribut, så att
    de fortsatt syns under Attributes på användaren. Den motsvarar den mapper
@@ -252,7 +269,12 @@ råa nycklar. Hemligheter i `config` anges av användaren som `$(env:NAMN)`.
    `syncMode: FORCE` så att medlemskapet tas bort när AD-gruppen försvinner.
    Namn: `team:<team> <- <AD-grupp>`.
 
-Cluster admins får sina mappers på samma sätt mot `/<parent>/cluster-admins`.
+3. **Övriga mappers** från `identityProvider.extraMappers`, renderade som
+   de är med `identityProviderAlias` ifyllt. Här kopieras de befintliga
+   mapparna för email, firstName, lastName och username template in, så att
+   de inte raderas när charten tar över providern.
+
+Cluster admins får sina gruppmappers på samma sätt mot `/<parent>/cluster-admins`.
 
 ### 4.4 Client scope `kafka-groups`
 
@@ -478,6 +500,9 @@ strukturella påståenden med `yq`. Exempel på fall:
 
 - två team som refererar samma topic ger en resurs men två permissions
 - ett team med två AD-grupper ger två mappers mot samma grupp
+- `providerId: oidc` ger `oidc-advanced-group-idp-mapper` med `claims`, och
+  `providerId: saml` ger `saml-advanced-group-idp-mapper` med `attributes`
+- `extraMappers` renderas med rätt alias och behåller sin config oförändrad
 - ett team utan `owns` och utan grants ger grupp, mapper och policy men inga
   permissions
 - samma team-map med `ownership.role: topic-owner` respektive `topic-reader`
@@ -523,6 +548,8 @@ Detta test körs manuellt eller i CI där podman finns, inte vid varje
 - Operatorn används inte. keycloak-config-cli är ensam skrivare i realmen.
 - Team representeras som Keycloak-grupper, inte roller, för synlighet i
   admin-UI:t och återanvändning i andra klienter.
+- ADFS ansluts som OIDC-provider, vilket är så den befintliga providern är
+  konfigurerad. SAML stöds men är inte standard.
 - AD-grupper mappas till Keycloak-grupper med "Advanced Attribute to Group",
   eftersom Authorization Services inte kan utvärdera user-attribut direkt
   utan JS-policies.
