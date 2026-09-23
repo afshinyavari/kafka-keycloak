@@ -27,7 +27,11 @@ class SimpleClients(unittest.TestCase):
         self.assertEqual(c["webOrigins"], ["+"])
         self.assertEqual(c["protocol"], "openid-connect")
         self.assertTrue(c["enabled"])
-        self.assertEqual(c["defaultClientScopes"], ["profile", "email", "roles", "web-origins", "kafka-groups"])
+        self.assertEqual(c["defaultClientScopes"], ["profile", "email", "roles", "web-origins", "basic", "acr", "kafka-groups"])
+
+    def test_default_client_scopes_configurable_but_always_include_groups(self):
+        realm = render_realm({"clients": CLIENTS, "clientDefaults": {"scopes": ["profile", "email"]}})
+        self.assertEqual(client(realm, "kafka-ui")["defaultClientScopes"], ["profile", "email", "kafka-groups"])
 
     def test_public_client_without_secret_env(self):
         c = client(render_realm({"clients": CLIENTS}), "kafka-cli")

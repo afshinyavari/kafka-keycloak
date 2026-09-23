@@ -1,0 +1,28 @@
+suite: realm configmap
+templates:
+  - configmap.yaml
+release:
+  name: kc
+values:
+  - values/base.yaml
+tests:
+  - it: renders the realm under realm.yaml with standard labels
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: kc-realm
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: kc
+      - matchRegex:
+          path: data["realm.yaml"]
+          pattern: "realm: kafka-test"
+
+  - it: fails without required values
+    set:
+      keycloak.url: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: keycloak.url is required

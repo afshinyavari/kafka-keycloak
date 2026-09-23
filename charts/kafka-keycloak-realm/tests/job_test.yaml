@@ -1,0 +1,272 @@
+suite: import job
+templates:
+  - job.yaml
+release:
+  name: kc
+  namespace: kafka
+values:
+  - values/base.yaml
+tests:
+  - it: is an ArgoCD PostSync hook by default with a stable name
+    asserts:
+      - isKind:
+          of: Job
+      - equal:
+          path: metadata.name
+          value: kc-import
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: PostSync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
+          value: BeforeHookCreation
+      - notExists:
+          path: spec.ttlSecondsAfterFinished
+
+  - it: uses a checksum-suffixed name and ttl in standalone mode
+    set:
+      job.argocdHook: false
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: ^kc-import-[0-9a-f]{8}$
+      - notExists:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 86400
+
+  - it: changes the standalone name when the realm content changes
+    set:
+      job.argocdHook: false
+      realm.displayName: something-else
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: ^kc-import-[0-9a-f]{8}$
+      - notEqual:
+          path: metadata.name
+          value: kc-import-00000000
+
+  - it: configures keycloak-config-cli through environment variables
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_URL
+            value: https://sso.example.com
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_LOGIN_REALM
+            value: kafka-test
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_GRANT_TYPE
+            value: client_credentials
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_CLIENTID
+            valueFrom:
+              secretKeyRef:
+                name: kcc-creds
+                key: clientId
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_CLIENTSECRET
+            valueFrom:
+              secretKeyRef:
+                name: kcc-creds
+                key: clientSecret
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_FILES_LOCATIONS
+            value: /config/realm.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_VARSUBSTITUTION_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_VALIDATE
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_SSL_VERIFY
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_MANAGED_CLIENT_SCOPE
+            value: no-delete
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: LOGGING_LEVEL_KEYCLOAKCONFIGCLI
+            value: info
+
+  - it: honours loginRealm, secret keys, importManaged overrides and extra env
+    set:
+      keycloak.loginRealm: master
+      keycloak.secretKeys.clientId: user
+      keycloak.secretKeys.clientSecret: pass
+      keycloak.sslVerify: false
+      job.importManaged:
+        client-scope: full
+        group: no-delete
+      job.env:
+        - name: IMPORT_REMOTE_STATE_ENABLED
+          value: "false"
+      job.envFrom:
+        - kafka-oauth-secrets
+        - adfs-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_LOGIN_REALM
+            value: master
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_CLIENTID
+            valueFrom:
+              secretKeyRef:
+                name: kcc-creds
+                key: user
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_SSL_VERIFY
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_MANAGED_CLIENT_SCOPE
+            value: full
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_MANAGED_GROUP
+            value: no-delete
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: IMPORT_REMOTE_STATE_ENABLED
+            value: "false"
+      - equal:
+          path: spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: kafka-oauth-secrets
+            - secretRef:
+                name: adfs-secret
+
+  - it: mounts the realm ConfigMap at /config
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: realm
+            configMap:
+              name: kc-realm
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: realm
+            mountPath: /config
+            readOnly: true
+
+  - it: has no init container without a CA bundle
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: JAVA_TOOL_OPTIONS
+          any: true
+
+  - it: builds a truststore from the CA bundle when configured
+    set:
+      keycloak.caBundleConfigMap: trusted-ca
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: truststore
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: ca-bundle
+            configMap:
+              name: trusted-ca
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: JAVA_TOOL_OPTIONS
+            value: -Djavax.net.ssl.trustStore=/truststore/cacerts -Djavax.net.ssl.trustStorePassword=changeit
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: truststore
+            mountPath: /truststore
+            readOnly: true
+
+  - it: runs restricted-SCC compatible with a pinned image
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/adorsys/keycloak-config-cli:6.5.1-26
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: [ALL]
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+      - equal:
+          path: spec.template.spec.restartPolicy
+          value: Never
+      - equal:
+          path: spec.backoffLimit
+          value: 1
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 600
+
+  - it: allows overriding the image
+    set:
+      image.repository: registry.example.com/mirror/keycloak-config-cli
+      image.tag: 6.5.1-26.4.0
+      imagePullSecrets:
+        - name: mirror-pull
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/mirror/keycloak-config-cli:6.5.1-26.4.0
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value:
+            - name: mirror-pull

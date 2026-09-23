@@ -29,7 +29,7 @@ One simple OIDC client. Usage: include "kafka-keycloak-realm.simpleClient" (dict
                  "standardFlowEnabled" true "directAccessGrantsEnabled" false
                  "serviceAccountsEnabled" ($c.serviceAccount | default false)
                  "redirectUris" ($c.redirectUris | default list) "webOrigins" (list "+")
-                 "defaultClientScopes" (list "profile" "email" "roles" "web-origins" "kafka-groups")
+                 "defaultClientScopes" (append (deepCopy .root.Values.clientDefaults.scopes) "kafka-groups")
                  "attributes" ($c.attributes | default dict) -}}
 {{- if $c.secretEnv }}{{ $_ := set $out "secret" (printf "$(env:%s)" $c.secretEnv) }}{{ end -}}
 {{- mergeOverwrite $out (deepCopy ($c.extra | default dict)) | toYaml -}}

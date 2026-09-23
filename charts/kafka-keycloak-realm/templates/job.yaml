@@ -1,0 +1,168 @@
+{{- $realm := include "kafka-keycloak-realm.realm" . -}}
+{{- $checksum := $realm | sha256sum | trunc 8 -}}
+{{- $truststore := .Values.keycloak.caBundleConfigMap -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  {{- if .Values.job.argocdHook }}
+  name: {{ .Release.Name }}-import
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: {{ .Values.job.hookDeletePolicy }}
+  {{- else }}
+  name: {{ .Release.Name }}-import-{{ $checksum }}
+  {{- end }}
+  labels:
+    {{- include "kafka-keycloak-realm.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
+  {{- if not .Values.job.argocdHook }}
+  ttlSecondsAfterFinished: {{ .Values.job.ttlSecondsAfterFinished }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "kafka-keycloak-realm.labels" . | nindent 8 }}
+      annotations:
+        checksum/realm: {{ $realm | sha256sum }}
+        {{- with .Values.job.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.job.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $truststore }}
+      initContainers:
+        - name: truststore
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              set -eu
+              cp "${JAVA_HOME:-/opt/java/openjdk}/lib/security/cacerts" /truststore/cacerts
+              chmod u+w /truststore/cacerts
+              # Split the PEM bundle: keytool only imports the first certificate of a file.
+              awk 'BEGIN{n=0} /-----BEGIN CERTIFICATE-----/{n++; f=sprintf("/tmp/ca-%03d.pem", n)} n>0{print > f}' /ca/{{ .Values.keycloak.caBundleKey }}
+              for f in /tmp/ca-*.pem; do
+                keytool -importcert -noprompt -trustcacerts -alias "$(basename "$f" .pem)" \
+                  -file "$f" -keystore /truststore/cacerts -storepass changeit
+              done
+          {{- with .Values.job.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: ca-bundle
+              mountPath: /ca
+              readOnly: true
+            - name: truststore
+              mountPath: /truststore
+            - name: tmp
+              mountPath: /tmp
+      {{- end }}
+      containers:
+        - name: keycloak-config-cli
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: KEYCLOAK_LOGIN_REALM
+              value: {{ .Values.keycloak.loginRealm | default .Values.realm.name | quote }}
+            - name: KEYCLOAK_GRANT_TYPE
+              value: client_credentials
+            - name: KEYCLOAK_CLIENTID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.existingSecret }}
+                  key: {{ .Values.keycloak.secretKeys.clientId }}
+            - name: KEYCLOAK_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.existingSecret }}
+                  key: {{ .Values.keycloak.secretKeys.clientSecret }}
+            - name: KEYCLOAK_SSL_VERIFY
+              value: {{ .Values.keycloak.sslVerify | quote }}
+            - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
+              value: "true"
+            - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
+              value: 120s
+            - name: IMPORT_FILES_LOCATIONS
+              value: /config/realm.yaml
+            - name: IMPORT_VARSUBSTITUTION_ENABLED
+              value: "true"
+            - name: IMPORT_VALIDATE
+              value: "true"
+            - name: LOGGING_LEVEL_KEYCLOAKCONFIGCLI
+              value: {{ .Values.job.logLevel | quote }}
+            {{- range $entity, $mode := .Values.job.importManaged }}
+            - name: IMPORT_MANAGED_{{ $entity | upper | replace "-" "_" }}
+              value: {{ $mode | quote }}
+            {{- end }}
+            {{- if $truststore }}
+            - name: JAVA_TOOL_OPTIONS
+              value: -Djavax.net.ssl.trustStore=/truststore/cacerts -Djavax.net.ssl.trustStorePassword=changeit
+            {{- end }}
+            {{- with .Values.job.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.job.envFrom }}
+          envFrom:
+            {{- range . }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.job.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.job.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: realm
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if $truststore }}
+            - name: truststore
+              mountPath: /truststore
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ .Release.Name }}-realm
+        - name: tmp
+          emptyDir: {}
+        {{- if $truststore }}
+        - name: ca-bundle
+          configMap:
+            name: {{ $truststore }}
+        - name: truststore
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.job.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.job.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.job.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

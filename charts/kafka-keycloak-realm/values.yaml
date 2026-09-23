@@ -9,6 +9,12 @@ keycloak:
   secretKeys:
     clientId: clientId
     clientSecret: clientSecret
+  sslVerify: true
+  # -- ConfigMap with a PEM bundle (key ca-bundle.crt) for an internal CA, e.g.
+  # one labelled config.openshift.io/inject-trusted-cabundle=true. An init
+  # container builds a Java truststore from it.
+  caBundleConfigMap: ""
+  caBundleKey: ca-bundle.crt
 
 # -- The realm this release manages.
 realm:
@@ -100,6 +106,11 @@ ownership:
 #   extra: {}                            # raw client config merged last
 clients: []
 
+# -- Defaults applied to every simple client.
+clientDefaults:
+  # -- Default client scopes; kafka-groups is always appended. Drop basic/acr on Keycloak < 25.
+  scopes: [profile, email, roles, web-origins, basic, acr]
+
 # -- The groups claim added by the kafka-groups client scope.
 groupsClaim:
   name: groups
@@ -115,3 +126,48 @@ externalClients: []
 
 # -- Raw realm representation merged last (mergeOverwrite: lists replace).
 extraRealm: {}
+
+image:
+  repository: docker.io/adorsys/keycloak-config-cli
+  # -- Format <cli-version>-<keycloak-version>. Pin to the RHBK version in use.
+  tag: 6.5.1-26
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+job:
+  # -- Run as an ArgoCD PostSync hook. false gives a checksum-named Job instead.
+  argocdHook: true
+  hookDeletePolicy: BeforeHookCreation
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  # -- Only used when argocdHook is false.
+  ttlSecondsAfterFinished: 86400
+  # -- Secrets whose keys become environment variables, for $(env:...) substitution.
+  envFrom: []
+  # -- Extra environment variables for keycloak-config-cli.
+  env: []
+  # -- keycloak-config-cli import.managed.<entity> modes, rendered as IMPORT_MANAGED_<ENTITY>.
+  # Everything else defaults to "full". client-scope is no-delete because the
+  # chart owns a single scope and must not remove Keycloak's optional built-ins.
+  importManaged:
+    client-scope: no-delete
+  logLevel: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
