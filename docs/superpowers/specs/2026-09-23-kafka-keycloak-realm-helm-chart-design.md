@@ -97,7 +97,8 @@ identityProvider:
   alias: adfs
   providerId: saml                      # saml | oidc
   displayName: ADFS
-  groupsAttribute: groups               # SAML-attribut (eller OIDC-claim) med AD-grupper
+  groupsAttribute: groups               # SAML-attributets namn (eller OIDC-claim) med AD-grupper
+  groupsAttributeFriendlyName: ""       # valfritt; SAML friendly name om den befintliga mappern använder det
   userAttribute: groups                 # user-attribut i Keycloak att spara dem i
   syncMode: FORCE
   config: {}                            # rå IdP-config: singleSignOnServiceUrl, signingCertificate, entityId ...
@@ -235,14 +236,17 @@ råa nycklar. Hemligheter i `config` anges av användaren som `$(env:NAMN)`.
 `identityProviderMappers` innehåller:
 
 1. **Attribute importer** som sparar alla AD-grupper som user-attribut, så att
-   de fortsatt syns under Attributes på användaren.
-   SAML: `saml-user-attribute-idp-mapper` med `attribute.name` och
-   `user.attribute`. OIDC: `oidc-user-attribute-idp-mapper` med `claim` och
-   `user.attribute`. Namn: `import-<userAttribute>`.
+   de fortsatt syns under Attributes på användaren. Den motsvarar den mapper
+   som redan finns på ADFS-providern idag; värdena i `groupsAttribute`
+   respektive `groupsAttributeFriendlyName` kopieras från den.
+   SAML: `saml-user-attribute-idp-mapper` med `attribute.name` eller
+   `attribute.friendly.name` och `user.attribute`. OIDC:
+   `oidc-user-attribute-idp-mapper` med `claim` och `user.attribute`.
+   Namn: `import-<userAttribute>`.
 2. **Advanced Attribute to Group**, en per team och AD-grupp, eftersom
    villkoren i en mapper är AND och vi vill ha OR mellan AD-grupper.
    SAML: `saml-advanced-group-idp-mapper` med `attributes` som JSON-sträng
-   `[{"key":"<groupsAttribute>","value":"<AD-grupp>"}]` och
+   `[{"key":"<groupsAttribute eller friendly name>","value":"<AD-grupp>"}]` och
    `are.attribute.values.regex: "false"`. OIDC: `oidc-advanced-group-idp-mapper`
    med `claims` och `are.claim.values.regex`. `group: /<parent>/<team>`,
    `syncMode: FORCE` så att medlemskapet tas bort när AD-gruppen försvinner.
@@ -513,8 +517,6 @@ Detta test körs manuellt eller i CI där podman finns, inte vid varje
   stör borttagning av objekt som skapats manuellt före första körningen.
   Om den stör dokumenteras `IMPORT_REMOTE_STATE_ENABLED=false` som
   rekommendation.
-- Att `saml-user-attribute-idp-mapper` importerar alla värden på ett
-  flervärdigt attribut i den RHBK-version som körs.
 
 ## 10. Beslut som fattats under designen
 
