@@ -1,0 +1,69 @@
+# Production. Humans read; only mTLS services (KafkaUser ACLs) write.
+
+keycloak:
+  url: https://sso.example.com
+  existingSecret: kafka-keycloak-admin         # keys: clientId, clientSecret
+  caBundleConfigMap: trusted-ca                 # ConfigMap labelled config.openshift.io/inject-trusted-cabundle=true
+
+realm:
+  name: kafka-prod
+  displayName: Kafka (prod)
+
+# The admin client the Keycloak team gave us. Never touched.
+externalClients:
+  - kafka-realm-admin
+
+ownership:
+  role: topic-reader
+
+kafka:
+  clientId: kafka
+  secretEnv: KAFKA_CLIENT_SECRET
+
+identityProvider:
+  alias: adfs
+  providerId: oidc
+  displayName: ADFS
+  groupsAttribute: groups
+  userAttribute: groups
+  config:
+    clientId: kafka-keycloak-prod
+    clientSecret: $(env:ADFS_CLIENT_SECRET)
+    authorizationUrl: https://adfs.example.com/adfs/oauth2/authorize
+    tokenUrl: https://adfs.example.com/adfs/oauth2/token
+    logoutUrl: https://adfs.example.com/adfs/oauth2/logout
+    issuer: https://adfs.example.com/adfs
+    jwksUrl: https://adfs.example.com/adfs/discovery/keys
+    useJwksUrl: "true"
+    validateSignature: "true"
+    defaultScope: openid profile email allatclaims
+    clientAuthMethod: client_secret_post
+  # Copied from the existing ADFS provider so they survive the takeover.
+  extraMappers:
+    - name: email
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config: { syncMode: FORCE, claim: email, user.attribute: email }
+    - name: firstName
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config: { syncMode: FORCE, claim: given_name, user.attribute: firstName }
+    - name: lastName
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config: { syncMode: FORCE, claim: family_name, user.attribute: lastName }
+    - name: username
+      identityProviderMapper: oidc-username-idp-mapper
+      config: { syncMode: FORCE, template: "${CLAIM.upn}", target: LOCAL }
+
+clients:
+  - name: kafka-ui
+    redirectUris: ["https://kafka-ui.apps.example.com/*"]
+    secretEnv: KAFKA_UI_CLIENT_SECRET
+  - name: schema-registry
+    redirectUris: ["https://schema-registry.apps.example.com/*"]
+    secretEnv: SCHEMA_REGISTRY_CLIENT_SECRET
+
+job:
+  # Secrets whose keys are referenced as $(env:NAME) above.
+  envFrom:
+    - kafka-oauth-client        # KAFKA_CLIENT_SECRET (shared with the Kafka CR)
+    - kafka-gui-clients         # KAFKA_UI_CLIENT_SECRET, SCHEMA_REGISTRY_CLIENT_SECRET
+    - adfs-client               # ADFS_CLIENT_SECRET

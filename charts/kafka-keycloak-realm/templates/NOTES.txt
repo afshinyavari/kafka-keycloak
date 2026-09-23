@@ -1,0 +1,18 @@
+Realm "{{ .Values.realm.name }}" will be applied to {{ .Values.keycloak.url }}
+by keycloak-config-cli from ConfigMap {{ .Release.Name }}-realm.
+
+{{- if .Values.job.argocdHook }}
+The import Job "{{ .Release.Name }}-import" is an ArgoCD PostSync hook and runs after every sync.
+{{- else }}
+The import Job is named after a checksum of the realm and re-runs on every change.
+{{- end }}
+
+Teams: {{ include "kafka-keycloak-realm.teamNames" . | fromYamlArray | join ", " }}
+Ownership role in this environment: {{ .Values.ownership.role }}
+
+Secrets referenced as $(env:...) must be present in the Secrets listed under job.envFrom:
+{{- range .Values.job.envFrom }}
+  - {{ . }}
+{{- else }}
+  (none configured; the kafka client secret $(env:{{ .Values.kafka.secretEnv }}) will fail substitution)
+{{- end }}

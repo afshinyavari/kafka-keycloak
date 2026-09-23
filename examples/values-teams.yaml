@@ -1,0 +1,29 @@
+# Shared team definitions. Identical in every environment; combine with a
+# values-<env>.yaml that sets realm, Keycloak connection and ownership.role:
+#
+#   helm template kc charts/kafka-keycloak-realm -f examples/values-teams.yaml -f examples/values-dev.yaml
+#
+# In ArgoCD, list both files under spec.source.helm.valueFiles.
+
+teams:
+  orders:
+    description: Team Orders
+    adGroups: ["AD-Kafka-Orders"]
+    owns:
+      topics: ["orders.*"]
+      consumerGroups: ["orders.*"]
+      transactionalIds: ["orders.*"]
+    grants:
+      # Read another team's reference data.
+      - role: topic-reader
+        topics: ["reference.*"]
+
+  billing:
+    description: Team Billing
+    adGroups: ["AD-Kafka-Billing", "AD-Kafka-Billing-Consultants"]
+    owns:
+      topics: ["billing.*", "reference.*"]
+      consumerGroups: ["billing.*"]
+
+clusterAdmins:
+  adGroups: ["AD-Kafka-Platform"]
