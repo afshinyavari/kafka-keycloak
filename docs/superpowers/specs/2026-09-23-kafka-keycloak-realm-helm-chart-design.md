@@ -1,7 +1,7 @@
 # Design: Helm-chart `kafka-keycloak-realm`
 
 Datum: 2026-09-23
-Status: utkast för granskning
+Status: godkänd och implementerad 2026-09-23. Avsnitt 11 listar avvikelser från utkastet.
 
 ## 1. Bakgrund och syfte
 
@@ -308,7 +308,9 @@ authorizationSettings:
   policies: [...]      # både policies och permissions
 ```
 
-**Resurser.** Unionen av alla resursmönster som teamen refererar, avdubblad.
+**Resurser.** Unionen av alla resursmönster som någon permission refererar,
+avdubblad. En resurs skapas bara om rollprofilen har scopes för resurstypen,
+så att inga oanvända resurser lämnas kvar i Keycloak.
 Namn `<Typ>:<mönster>`, eller `kafka-cluster:<clusterName>,<Typ>:<mönster>`
 om `kafka.clusterName` är satt. `type` sätts till `Topic`, `Group`,
 `TransactionalId` eller `Cluster`. Varje resurs får hela `kafka.scopes` som
@@ -386,20 +388,30 @@ Miljövariabler:
 | Variabel | Värde |
 |---|---|
 | `KEYCLOAK_URL` | `keycloak.url` |
-| `KEYCLOAK_LOGIN_REALM` | `keycloak.loginRealm` eller `realm.name` |
-| `KEYCLOAK_GRANT_TYPE` | `client_credentials` |
+| `KEYCLOAK_LOGINREALM` | `keycloak.loginRealm` eller `realm.name` |
+| `KEYCLOAK_GRANTTYPE` | `client_credentials` |
 | `KEYCLOAK_CLIENTID` | från `keycloak.existingSecret` |
 | `KEYCLOAK_CLIENTSECRET` | från `keycloak.existingSecret` |
-| `KEYCLOAK_SSL_VERIFY` | `keycloak.sslVerify` |
+| `KEYCLOAK_SSLVERIFY` | `keycloak.sslVerify` |
 | `KEYCLOAK_AVAILABILITYCHECK_ENABLED` | `true` |
 | `KEYCLOAK_AVAILABILITYCHECK_TIMEOUT` | `120s` |
 | `IMPORT_FILES_LOCATIONS` | `/config/realm.yaml` |
 | `IMPORT_VARSUBSTITUTION_ENABLED` | `true` |
 | `IMPORT_VALIDATE` | `true` |
-| `LOGGING_LEVEL_KEYCLOAKCONFIGCLI` | `job.logLevel` |
+| `LOGGING_LEVEL_KCC` | `job.logLevel` |
+| `IMPORT_MANAGED_CLIENTSCOPE` | `no-delete` (se nedan) |
 
-Alla `IMPORT_MANAGED_*` lämnas på standardvärdet `full`. Överstyrningar görs
-via `job.env`. Därutöver `envFrom` med varje Secret i `job.envFrom`.
+Miljövariabelnamnen följer Spring Boots relaxed binding: bindestreck i
+property-namn försvinner (`keycloak.login-realm` blir `KEYCLOAK_LOGINREALM`).
+Varianter med understreck ignoreras tyst, och keycloak-config-cli faller då
+tillbaka på password-grant mot master. Loggnivån sätts via gruppaliaset `kcc`
+eftersom gruppen `keycloak-config-cli` inte kan adresseras från en miljövariabel.
+
+`IMPORT_MANAGED_*` styrs av mappen `job.importManaged` och lämnas annars på
+`full`. Undantaget är client scopes, som är `no-delete` som standard: charten
+äger bara scopet `kafka-groups`, och keycloak-config-cli skyddar vid radering
+bara realmens default-scopes, inte de optionella som `offline_access`.
+Därutöver `envFrom` med varje Secret i `job.envFrom`.
 
 **ArgoCD-läge** (`job.argocdHook: true`, standard): annoteringarna
 `argocd.argoproj.io/hook: PostSync` och
@@ -493,10 +505,11 @@ lägena, att namnet innehåller checksumman i fristående läge, att init-contai
 bara renderas när `caBundleConfigMap` är satt, att `envFrom` och secret-nycklar
 hamnar rätt, och att security context är korrekt.
 
-### 8.2 Tester av realm-innehållet (yq)
+### 8.2 Tester av realm-innehållet (python unittest)
 
-Ett skript renderar charten med testvalues, plockar ut `realm.yaml` och gör
-strukturella påståenden med `yq`. Exempel på fall:
+`test/realm/` renderar charten med `helm template`, parsar `realm.yaml` ur
+ConfigMappen med PyYAML och gör strukturella påståenden med Pythons inbyggda
+unittest. Exempel på fall:
 
 - två team som refererar samma topic ger en resurs men två permissions
 - ett team med två AD-grupper ger två mappers mot samma grupp
@@ -533,15 +546,14 @@ skript som:
 Detta test körs manuellt eller i CI där podman finns, inte vid varje
 `helm template`.
 
-## 9. Öppna punkter att verifiera under implementationen
+## 9. Öppna punkter, avgjorda under implementationen
 
-- Exakt image-tag för keycloak-config-cli som matchar den RHBK-version som
-  körs. Tagg-formatet är `<cli-version>-<keycloak-version>`.
-- Att keycloak-config-cli:s `remote-state`-funktion, som är påslagen som
-  standard och gör att verktyget bara raderar objekt det själv skapat, inte
-  stör borttagning av objekt som skapats manuellt före första körningen.
-  Om den stör dokumenteras `IMPORT_REMOTE_STATE_ENABLED=false` som
-  rekommendation.
+- **Image-tag.** Standard är `6.5.1-26`, som följer senaste Keycloak 26.x.
+  Pinna till exakt RHBK-version via `image.tag`, formatet är
+  `<cli-version>-<keycloak-version>`.
+- **Remote state.** Integrationstestet skapar en grupp för hand före första
+  importen och verifierar att den raderas. Objekt som skapats manuellt inom
+  full-hanterade kategorier tas alltså bort, vilket är avsett beteende.
 
 ## 10. Beslut som fattats under designen
 
@@ -560,3 +572,20 @@ Detta test körs manuellt eller i CI där podman finns, inte vid varje
 - Team är en map och ägande är ett eget begrepp (`owns` plus
   `ownership.role`), så att teamdefinitionen är identisk i alla miljöer och
   skillnaden mellan dev och prod är en rad i miljöfilen.
+
+## 11. Avvikelser från utkastet
+
+- Realm-innehållet testas med Python unittest och PyYAML i stället för yq,
+  eftersom strukturella påståenden på nästlad JSON i policy-config blir
+  läsbara i Python.
+- `teams.<namn>: null` i en miljöfil tar bort teamet där. Behovet uppstod när
+  integrationstestet skulle ta bort ett team med `--set`, och det är samma
+  mekanism en miljöfil behöver.
+- `clientDefaults.scopes` styr de enkla klienternas default-scopes och
+  inkluderar `basic` och `acr`, eftersom `basic` bidrar med `sub`-claimen i
+  Keycloak 25 och senare.
+- Miljövariabelnamn i Jobbet enligt avsnitt 5.2, rättade efter att
+  integrationstestet visade att de ursprungliga namnen ignorerades.
+- Integrationstestet kör med ett annat bootstrap-lösenord än
+  keycloak-config-cli:s standard, så att en tyst fallback till password-grant
+  inte kan dölja en trasig client-credentials-inloggning.
