@@ -113,6 +113,46 @@ och `resources`/`scopes`/`applyPolicies` i permissions.
 | `printf` | Som i C. `%q` citerar strängen i felmeddelanden. |
 | `fail "msg"` | Avbryt renderingen med felet. Så rapporteras okända roller. |
 
+## Anropsträdet
+
+`_realm.tpl` är toppen, men inte den enda anroparen. De fem stora
+funktionerna anropar mindre hjälpfunktioner, ofta i andra filer. Helm
+laddar alla `_*.tpl` i en gemensam namnrymd, så filgränserna är bara för
+läsbarhet. Prefixet `kafka-keycloak-realm.` är utelämnat nedan.
+
+```
+configmap.yaml  och  job.yaml
+  └─ realm                          (_realm.tpl)
+       ├─ validate                  (_helpers.tpl)
+       ├─ groups                    (_realm_groups.tpl)
+       │    ├─ teamNames
+       │    └─ team
+       ├─ identityProviders         (_realm_idp.tpl)
+       ├─ identityProviderMappers   (_realm_idp.tpl)
+       │    ├─ idpGroupsImporter
+       │    ├─ teamNames, team      (_realm_groups.tpl)
+       │    └─ idpGroupMapper
+       │         └─ groupPath       (_realm_groups.tpl)
+       ├─ groupsClientScope         (_realm_clients.tpl)
+       └─ clients                   (_realm_clients.tpl)
+            ├─ kafkaClient          (_realm_kafka.tpl)
+            │    └─ kafkaAuthz
+            │         ├─ teamNames, groupPath   (_realm_groups.tpl)
+            │         ├─ teamGrants
+            │         │    └─ team              (_realm_groups.tpl)
+            │         ├─ roleProfile
+            │         └─ resourceName
+            └─ simpleClient
+```
+
+Ett sätt att tänka: `_realm.tpl` är `main()`, `_realm_groups.tpl` är ett
+delat bibliotek eftersom allt i realmen är organiserat per team, och de
+andra tre filerna är moduler som var och en äger en del av realm-filen.
+
+`realm` anropas två gånger, från `configmap.yaml` för innehållet och från
+`job.yaml` för checksumman. Det är därför Jobbets namn i fristående läge
+ändras när realmen ändras.
+
 ## Dataflödet
 
 ```
