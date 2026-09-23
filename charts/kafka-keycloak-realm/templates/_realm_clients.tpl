@@ -1,6 +1,18 @@
-{{/*
-Client scope that puts the user's groups into tokens.
-*/}}
+{{- /*
+=====================================================================
+_realm_clients.tpl: client scope "kafka-groups", de enkla klienterna
+(Kafka UI, Schema Registry ...) och stubbarna för externa klienter.
+=====================================================================
+*/ -}}
+
+{{- /*
+groupsClientScope: ett client scope med en group membership-mapper som
+lägger användarens Keycloak-grupper i claimen "groups". Valfritt även
+en mapper som exponerar de råa AD-gruppnamnen från user-attributet.
+
+Keycloak lagrar mapper-config som strängar, även booleans. Därför
+"true"/"false" i citattecken och toString på fullPath.
+*/ -}}
 {{- define "kafka-keycloak-realm.groupsClientScope" -}}
 {{- $gc := .Values.groupsClaim -}}
 {{- $mappers := list (dict
@@ -19,9 +31,16 @@ Client scope that puts the user's groups into tokens.
          "protocolMappers" $mappers | toYaml -}}
 {{- end -}}
 
-{{/*
-One simple OIDC client. Usage: include "kafka-keycloak-realm.simpleClient" (dict "root" $ "client" $c)
-*/}}
+{{- /*
+simpleClient: en post ur values "clients" -> en Keycloak-klient.
+
+  * Utan secretEnv blir klienten public (ingen secret alls).
+  * defaultClientScopes = clientDefaults.scopes + "kafka-groups". deepCopy
+    behövs för att append inte ska ändra listan i .Values för nästa klient.
+  * "extra" slås ihop sist med mergeOverwrite och kan skriva över allt.
+
+Argument: (dict "root" $ "client" <posten ur clients>)
+*/ -}}
 {{- define "kafka-keycloak-realm.simpleClient" -}}
 {{- $c := .client -}}
 {{- $out := dict "clientId" $c.name "name" $c.name "enabled" true "protocol" "openid-connect"
@@ -35,9 +54,14 @@ One simple OIDC client. Usage: include "kafka-keycloak-realm.simpleClient" (dict
 {{- mergeOverwrite $out (deepCopy ($c.extra | default dict)) | toYaml -}}
 {{- end -}}
 
-{{/*
-All clients: kafka, simple clients, external stubs.
-*/}}
+{{- /*
+clients: hela klientlistan i ordningen kafka, enkla klienter, externa stubbar.
+
+Stubben för en extern klient innehåller bara clientId och name.
+keycloak-config-cli uppdaterar klienter med patch-semantik, där fält
+som saknas lämnas orörda, så stubben bevarar klienten exakt som den är
+samtidigt som den inte raderas av import.managed.client=full.
+*/ -}}
 {{- define "kafka-keycloak-realm.clients" -}}
 {{- $clients := list (include "kafka-keycloak-realm.kafkaClient" . | fromYaml) -}}
 {{- range $c := .Values.clients | default list -}}

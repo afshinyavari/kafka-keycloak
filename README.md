@@ -5,7 +5,8 @@ topics och consumer groups beskrivs i values-filer. Charten genererar en
 realm-fil och ett Kubernetes Job som applicerar den med
 [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli).
 
-Designen finns i [docs/superpowers/specs](docs/superpowers/specs/).
+Designen finns i [docs/superpowers/specs](docs/superpowers/specs/). Hur templates-filerna
+fungerar förklaras i [docs/helm-templates.md](docs/helm-templates.md).
 
 ## Vad charten äger
 
