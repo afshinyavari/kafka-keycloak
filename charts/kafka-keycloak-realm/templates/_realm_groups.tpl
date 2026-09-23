@@ -3,7 +3,11 @@ Team names as a sorted list, including the synthetic cluster-admins team when en
 Returns YAML list.
 */}}
 {{- define "kafka-keycloak-realm.teamNames" -}}
-{{- $names := keys (.Values.teams | default dict) | sortAlpha -}}
+{{- $names := list -}}
+{{- range $name, $team := .Values.teams | default dict -}}
+{{- if kindIs "map" $team }}{{ $names = append $names $name }}{{ end -}}
+{{- end -}}
+{{- $names = sortAlpha $names -}}
 {{- if .Values.clusterAdmins.adGroups }}{{ $names = append $names "cluster-admins" }}{{ end -}}
 {{- toYaml $names -}}
 {{- end -}}

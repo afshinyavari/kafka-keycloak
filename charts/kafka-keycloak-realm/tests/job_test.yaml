@@ -58,12 +58,12 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: KEYCLOAK_LOGIN_REALM
+            name: KEYCLOAK_LOGINREALM
             value: kafka-test
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: KEYCLOAK_GRANT_TYPE
+            name: KEYCLOAK_GRANTTYPE
             value: client_credentials
       - contains:
           path: spec.template.spec.containers[0].env
@@ -99,7 +99,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: KEYCLOAK_SSL_VERIFY
+            name: KEYCLOAK_SSLVERIFY
             value: "true"
       - contains:
           path: spec.template.spec.containers[0].env
@@ -109,12 +109,12 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: IMPORT_MANAGED_CLIENT_SCOPE
+            name: IMPORT_MANAGED_CLIENTSCOPE
             value: no-delete
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: LOGGING_LEVEL_KEYCLOAKCONFIGCLI
+            name: LOGGING_LEVEL_KCC
             value: info
 
   - it: honours loginRealm, secret keys, importManaged overrides and extra env
@@ -136,7 +136,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: KEYCLOAK_LOGIN_REALM
+            name: KEYCLOAK_LOGINREALM
             value: master
       - contains:
           path: spec.template.spec.containers[0].env
@@ -149,12 +149,12 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: KEYCLOAK_SSL_VERIFY
+            name: KEYCLOAK_SSLVERIFY
             value: "false"
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: IMPORT_MANAGED_CLIENT_SCOPE
+            name: IMPORT_MANAGED_CLIENTSCOPE
             value: full
       - contains:
           path: spec.template.spec.containers[0].env

@@ -1,0 +1,48 @@
+keycloak:
+  url: http://keycloak:8080
+  existingSecret: unused-in-integration
+realm:
+  name: kafka-it
+externalClients:
+  - kafka-realm-admin
+identityProvider:
+  alias: adfs
+  providerId: oidc
+  displayName: ADFS
+  config:
+    clientId: kafka-keycloak
+    clientSecret: $(env:ADFS_CLIENT_SECRET)
+    authorizationUrl: https://adfs.example.com/adfs/oauth2/authorize
+    tokenUrl: https://adfs.example.com/adfs/oauth2/token
+    clientAuthMethod: client_secret_post
+  extraMappers:
+    - name: email
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config: { syncMode: FORCE, claim: email, user.attribute: email }
+    - name: username
+      identityProviderMapper: oidc-username-idp-mapper
+      config: { syncMode: FORCE, template: "${CLAIM.upn}", target: LOCAL }
+teams:
+  orders:
+    description: Team Orders
+    adGroups: ["AD-Kafka-Orders"]
+    owns:
+      topics: ["orders.*"]
+      consumerGroups: ["orders.*"]
+      transactionalIds: ["orders.*"]
+    grants:
+      - role: topic-reader
+        topics: ["reference.*"]
+  billing:
+    adGroups: ["AD-Kafka-Billing", "AD-Kafka-Billing-Ext"]
+    owns:
+      topics: ["billing.*", "reference.*"]
+      consumerGroups: ["billing.*"]
+clusterAdmins:
+  adGroups: ["AD-Kafka-Platform"]
+clients:
+  - name: kafka-ui
+    redirectUris: ["https://kafka-ui.example.com/*"]
+    secretEnv: KAFKA_UI_CLIENT_SECRET
+  - name: kafka-cli
+    redirectUris: ["http://localhost:*"]

@@ -29,7 +29,8 @@ groups:
   parent: kafka
 
 # -- Teams, keyed by name. Maps merge across values files, so a shared teams
-# file can be combined with per-environment overrides.
+# file can be combined with per-environment overrides. Setting a team to null
+# in an environment file removes it there.
 # orders:
 #   description: Team Orders
 #   adGroups: ["AD-Kafka-Orders"]
@@ -146,7 +147,8 @@ job:
   envFrom: []
   # -- Extra environment variables for keycloak-config-cli.
   env: []
-  # -- keycloak-config-cli import.managed.<entity> modes, rendered as IMPORT_MANAGED_<ENTITY>.
+  # -- keycloak-config-cli import.managed.<entity> modes, rendered as
+  # IMPORT_MANAGED_<ENTITY> with dashes removed (Spring relaxed binding).
   # Everything else defaults to "full". client-scope is no-delete because the
   # chart owns a single scope and must not remove Keycloak's optional built-ins.
   importManaged:

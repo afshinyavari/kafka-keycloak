@@ -24,6 +24,13 @@ class Groups(unittest.TestCase):
         realm = render_realm({"teams": TEAMS, "clusterAdmins": {"adGroups": ["AD-Kafka-Platform"]}})
         self.assertIn("cluster-admins", [g["name"] for g in by_name(realm["groups"], "kafka")["subGroups"]])
 
+    def test_team_set_to_null_is_dropped(self):
+        # Lets an environment file remove a team from the shared teams file.
+        realm = render_realm({"teams": {**TEAMS, "billing": None}})
+        self.assertEqual([g["name"] for g in by_name(realm["groups"], "kafka")["subGroups"]], ["orders"])
+        kafka = [c for c in realm["clients"] if c["clientId"] == "kafka"][0]
+        self.assertNotIn("team:billing", [p["name"] for p in kafka["authorizationSettings"]["policies"]])
+
 
 if __name__ == "__main__":
     unittest.main()

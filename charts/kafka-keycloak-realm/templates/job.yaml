@@ -76,9 +76,9 @@ spec:
           env:
             - name: KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
-            - name: KEYCLOAK_LOGIN_REALM
+            - name: KEYCLOAK_LOGINREALM
               value: {{ .Values.keycloak.loginRealm | default .Values.realm.name | quote }}
-            - name: KEYCLOAK_GRANT_TYPE
+            - name: KEYCLOAK_GRANTTYPE
               value: client_credentials
             - name: KEYCLOAK_CLIENTID
               valueFrom:
@@ -90,7 +90,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.keycloak.existingSecret }}
                   key: {{ .Values.keycloak.secretKeys.clientSecret }}
-            - name: KEYCLOAK_SSL_VERIFY
+            - name: KEYCLOAK_SSLVERIFY
               value: {{ .Values.keycloak.sslVerify | quote }}
             - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
               value: "true"
@@ -102,10 +102,11 @@ spec:
               value: "true"
             - name: IMPORT_VALIDATE
               value: "true"
-            - name: LOGGING_LEVEL_KEYCLOAKCONFIGCLI
+            - name: LOGGING_LEVEL_KCC
               value: {{ .Values.job.logLevel | quote }}
             {{- range $entity, $mode := .Values.job.importManaged }}
-            - name: IMPORT_MANAGED_{{ $entity | upper | replace "-" "_" }}
+            {{- /* Spring relaxed binding: import.managed.client-scope -> IMPORT_MANAGED_CLIENTSCOPE */}}
+            - name: IMPORT_MANAGED_{{ $entity | upper | replace "-" "" }}
               value: {{ $mode | quote }}
             {{- end }}
             {{- if $truststore }}

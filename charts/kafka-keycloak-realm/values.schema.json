@@ -137,7 +137,7 @@
     },
     "teams": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/team" }
+      "additionalProperties": { "oneOf": [{ "$ref": "#/$defs/team" }, { "type": "null" }] }
     },
     "clusterAdmins": {
       "type": "object",
