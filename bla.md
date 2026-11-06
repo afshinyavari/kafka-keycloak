@@ -1,10 +1,8 @@
-# OpenShift-plattformen – krav på framtida infrastruktur
-
-Nov 5, 2026 · @Afshin
+# OpenShift-plattformens – krav på framtida infrastruktur
 
 ## Bakgrund och syfte
 
-Vi är plattformsteamet som driftar OpenShift on-prem. Klustren installeras idag med UPI ovanpå VMware, och allt vi levererar till våra nyttjare står och faller med nät, lagring och kringtjänster som andra äger.
+Klustren installeras idag med UPI ovanpå VMware, och allt vi levererar till våra nyttjare står och faller med nät, lagring och kringtjänster som andra äger.
 
 Det här dokumentet är vårt underlag till infraprojektet. Det beskriver vad plattformen behöver i den nya infrastrukturen. Vi har medvetet inte tagit med krav på den nuvarande miljön. Vi har försökt skriva krav på förmågor och mätbara egenskaper snarare än på specifika produkter, så att projektet har frihet att välja lösning. Där vi har en tydlig uppfattning om lösningen säger vi det och förklarar varför.
 
@@ -12,11 +10,11 @@ Kraven har id (t.ex. SITE-02) så att det går att hänvisa till dem i fortsatt 
 
 ## Nuläge
 
-Idag kör vi det man brukar kalla 2,5 siter: två fullvärdiga datahallar och en tredje plats som bara håller ett vittne för quorum. Det fungerar, men har tre problem som vi vill att den nya infrastrukturen löser.
+Idag kör vi det man brukar kalla 2,5 siter: två fullvärdiga datahallar och en tredje plats som bara håller ett vittne för quorum. Detta medför tre problem som vi vill att den nya infrastrukturen löser.
 
 1. Vittnessiten har ingen egen routing. Den kan inte ta trafik och den blir beroende av de andra två för att nås alls. I praktiken har vi därför inte tre oberoende felzoner.
 2. Infrastrukturen är byggd för aktiv/passiv med en primär och en sekundär site. All trafik som lämnar klustret går via primärsiten, även när podden kör på sekundärsiten. Det ger onödig trafik mellan siterna och extra latens.
-3. Eftersom vi är beroende av primärsiten är vi också beroende av att failovern till sekundärsiten fungerar när det väl gäller. Den är sällan testad på ett sätt som vi kan verifiera.
+3. Eftersom vi är beroende av primärsiten är vi också beroende av att failovern till sekundärsiten fungerar när det väl gäller. Vad vi förstår är denna failover manuell och kräver handpåläggning i den sekundära siten.
 
 Resultatet är att klustret är mer redundant på papperet än i verkligheten.
 
@@ -34,17 +32,17 @@ Konkret betyder det:
 
 ## Varför stretch över tre siter och inte ett kluster per site
 
-Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, främst Kafka och Postgres. De hanteras av operatorer som sköter replikering och automatisk failover, men bara inom ett och samma kluster. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
+Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, främst Kafka, AMQP och Postgres (i framtiden kanske även NoSQL och cache). De hanteras av operatorer som är klusterbundna. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
 
 ### Det naturliga alternativet: ett kluster per site
 
-Med ett kluster per site måste replikeringen mellan siterna ske mellan kluster. För Kafka betyder det i praktiken MirrorMaker 2 och för Postgres replica- eller standby-kluster. Båda är asynkrona och kräver att någon, en människa eller ett skript, bestämmer att den andra siten ska ta över. Vid ett sitebortfall förlorar vi då data som inte hunnit replikeras, och tjänsten är nere tills failovern är gjord.
+Med ett kluster per site måste replikeringen mellan siterna ske mellan kluster. För Kafka betyder det i praktiken MirrorMaker 2 och för Postgres replica- eller standby-kluster. Båda är asynkrona och kräver att någon, en människa eller ett skript, bestämmer att den andra siten ska ta över. Vid ett sitebortfall förlorar vi då data som inte hunnit replikeras, och tjänsten är nere tills failovern är gjord. Eller att vi släpper operatorspåret och installerar dessa applikationer på ett mer traditionellt sätt och därmed tappar värdefulla egenskaper i drift och förvaltning.
 
-I ett stretchat kluster ligger replikerna på olika siter men i samma kluster. Operatorerna väljer ny ledare automatiskt, och med synkron replikering förloras ingen bekräftad data.
+I ett stretchat kluster ligger replikerna på olika siter men i samma kluster. Operatorerna eller applikationerna själv, väljer ny ledare automatiskt, och med synkron replikering förloras ingen bekräftad data.
 
 | Egenskap | Stretch över tre siter | Ett kluster per site |
 | --- | --- | --- |
-| Failover för Kafka och Postgres vid sitebortfall | Automatisk, sköts av operatorn | Manuell eller skriptad promotion mellan kluster |
+| Failover för Kafka och Postgres vid sitebortfall | Automatisk, sköts av operatorn (postgres) och Kraft (kafka) | Manuell eller skriptad promotion mellan kluster |
 | Dataförlust vid sitebortfall (RPO) | Ingen för bekräftade skrivningar | Det som inte hunnit replikeras asynkront |
 | Quorum (etcd, Kafka KRaft, Postgres) | Tre röster i tre felzoner | Quorum per site, inget gemensamt |
 | Skydd mot logiska fel (felaktig uppgradering, felkonfiguration) | Sämre, ett kluster påverkar alla siter | Bättre, felet stannar i en site |
@@ -76,9 +74,9 @@ Stretch skyddar mot fysiska fel men inte mot logiska. En misslyckad uppgradering
 3. Två stretchade produktionskluster i stället för ett. Ett sitebortfall hanteras automatiskt inom varje kluster. Om ett helt kluster går sönder på grund av ett logiskt fel kan kritiska tjänster ta över i det andra, till exempel Kafka med MirrorMaker 2 eller Postgres med ett replica cluster. Den vägen är asynkron och kräver manuell failover, men behövs bara i det ovanliga fallet. Klustren uppgraderas och ändras aldrig samtidigt, och stateless-tjänster kan köra aktivt i båda bakom DNS.
 4. All konfiguration i Git, så att ett kluster går att bygga upp från grunden.
 
-Två kluster skyddar mot fel i ett kluster, men inte mot fel i det som båda delar: nät, brandväggar, DNS, IdP och S3. Det är en av anledningarna till att kraven på gemensamma tjänster (GEM-01 och GEM-02) är viktiga.
+Två kluster skyddar mot fel i ett kluster, men inte mot fel i det som båda delar såsom nät, brandväggar, DNS, IdP och S3. Det är en av anledningarna till att kraven på gemensamma tjänster (GEM-01 och GEM-02) är viktiga.
 
-Kravet på latens mellan siterna kommer inte från Kubernetes utan från tillgänglighetskravet på de stateful tjänsterna. Kafka och Postgres som replikerar synkront över tre siter väntar på en rundtur per skrivning oavsett om de kör i OpenShift eller på virtuella maskiner. Det som är specifikt för ett stretchat kluster är trafiken mellan noderna, och det är därför kraven på brandväggar längre ner i dokumentet är så specifika.
+Kravet på latens mellan siterna kommer inte från Kubernetes utan från tillgänglighetskravet på stateful tjänsterna. Kafka och Postgres som replikerar synkront över tre siter väntar på en rundtur per skrivning oavsett om de kör i OpenShift eller på virtuella maskiner. Det som är specifikt för ett stretchat kluster är trafiken mellan noderna, och det är därför kraven på brandväggar längre ner i dokumentet är så specifika.
 
 ## Krav
 
@@ -103,19 +101,19 @@ Trafik mellan poddar på olika noder går inkapslad i Geneve-tunnlar (UDP 6081).
 | FW-01 | Nodnäten i ett och samma kluster behandlas som en säkerhetszon. Trafik mellan dem släpps igenom utan inspektion enligt Red Hats portlista, utan korta sessionstimeouts och med kapacitet för all trafik mellan siterna. | Brandväggen ser bara Geneve-trafik nod till nod och kan inte inspektera innehållet. etcd och långlivade API-anslutningar är känsliga för latens, jitter och avbrutna sessioner. |
 | FW-02 | Vägen mellan siterna, inklusive brandväggar, ska klara den MTU som klustret behöver. Geneve lägger till 100 byte per paket. Exakt värde bestäms tillsammans. | Fel MTU ger svårfelsökta problem där små paket går fram men stora inte gör det. |
 | FW-03 | Uppgradering och failover av brandväggar mellan siterna får inte bryta etablerade sessioner mellan noder, eller ska planeras tillsammans med oss. | Tappat state kan ge omval av ledare i etcd och störningar i hela klustret. |
-| FW-04 | IP-planen ska ha utrymme för routade pod-nät per namespace eller tenant, som annonseras med BGP från alla siter och kan användas i brandväggsregler. | Med L3 per site fungerar egress-IP dåligt: ett namespace behöver en adress per site och trafiken kan gå ut via fel site. Routade pod-nät ger lokal utgång och en stabil adress per namespace att skriva regler mot. |
+| FW-04 | IP-planen ska ha utrymme för routade pod-nät per namespace eller tenant, som annonseras med BGP från alla siter och kan användas i brandväggsregler. | Med L3 per site fungerar egress-IP dåligt. Ett namespace behöver en adress per site och trafiken kan gå ut via fel site. Routade pod-nät ger lokal utgång och en stabil adress per namespace att skriva regler mot. |
 | FW-05 | Replikering mellan de två klustren, till exempel MirrorMaker 2 för Kafka och replikering för Postgres, ska kunna gå mellan siterna med brandväggsregler och bandbredd för det. | Det är vanlig applikationstrafik mellan kluster och omfattas inte av FW-01. |
 
 ### Trafik in och ut ur klustret
 
 | Id | Krav | Varför |
 | --- | --- | --- |
-| TRAF-01 | Trafik ut från klustret ska kunna lämna via den site där podden kör. | Undviker att all trafik går via primärsiten. |
+| TRAF-01 | Trafik ut från klustret ska kunna lämna via den site där podden kör. | Undviker att all trafik går via "primärsiten". |
 | TRAF-02 | Inkommande trafik ska kunna tas emot på alla tre siter samtidigt. | Aktiv/aktiv/aktiv och inget beroende av failover. |
 | TRAF-03 | Brandväggar och routing ska klara att en session går in på en site och svaret ut på en annan, eller så ska designen garantera symmetriska flöden per site. | Stateful brandväggar per site utan state-synk är det vanligaste skalet till att aktiv/aktiv inte fungerar. |
 | TRAF-04 | Vi ska kunna peera BGP mot nätet i alla tre siter och annonsera adresser för tjänster, ingress och egress. | Ger oss ett standardgränssnitt som fungerar likadant på VCF och bare metal. |
 | TRAF-05 | Brandväggsregler och IP-planer ska acceptera källadresser från alla tre siter för samma tjänst. | Applikationer flyttar mellan siter och tar sina egress-adresser med sig. |
-| TRAF-06 | Vi ska ha API-åtkomst till DNS för de zoner vi använder, så att poster kan skapas automatiskt från klustret. | Styrning via DNS får inte bero på manuella ärenden. |
+| TRAF-06 | Vi behöver API-åtkomst till DNS för de zoner vi använder, så att poster kan skapas automatiskt från klustret. | Styrning via DNS får inte bero på manuella ärenden. |
 | TRAF-07 | Om DNS-baserad lastbalansering (GSLB) används ska den ha hälsokontroller per site och korta TTL:er. | Annars pekar DNS på en site som inte svarar. |
 | TRAF-08 | Proxy för utgående trafik och lastbalanserare för inkommande trafik ska finnas i varje site. | De ligger i datavägen. En proxy eller lastbalanserare i en annan site gör att trafiken ändå går via den siten, oavsett TRAF-01 och TRAF-02. |
 
@@ -179,49 +177,3 @@ Vi har förstått att ACI är aktuellt som underlay. Vi har inget emot det, men 
 | SAM-01 | Plattformsteamet deltar i designarbetet för nät, lagring och virtualisering. | Vi är beroende av besluten och kan bidra med krav tidigt. |
 | SAM-02 | Bortfall av en site testas regelbundet och gemensamt, minst en gång per år. | Det är enda sättet att veta att designen håller. |
 | SAM-03 | Ändringar i infrastrukturen som påverkar plattformen kommuniceras i förväg, med möjlighet för oss att testa. | Undviker överraskningar i produktion. |
-
-## Ansvarsfördelning
-
-Flera av förmågorna i det här dokumentet kan levereras på olika nivåer: av infrastrukturen, av plattformen eller av varje applikation. Vi delar principen att tillgänglighet ska lösas så nära applikationen som är rimligt, och för Kafka och Postgres gör vi redan det. Men en förmåga som flyttas uppåt försvinner inte. Den måste lösas av någon, och ju högre upp desto fler gånger.
-
-Tabellen visar vilka alternativ som finns och vad som händer om ingen tar ansvaret. Vi vill att varje rad får ett beslut i projektet.
-
-| Förmåga | Infrastrukturen levererar | Plattformen levererar | Applikationen löser | Om ingen tar ansvaret |
-| --- | --- | --- | --- | --- |
-| Data som ska överleva ett sitebortfall | S3 med replikering mellan siterna (LAG-03) | Meddelandeköer och databaser som tjänster, med snabb lokal lagring | Lägger sin data i någon av dessa i stället för på lokala volymer | Data på lokala volymer försvinner vid ett sitebortfall |
-| Snabb lokal lagring (LAG-01) | Lokala diskar eller lokal datastore per site | Exponerar lagringen i klustret med topologistöd | – | Kafka och Postgres får sämre prestanda eller dubbel replikering |
-| Replikering för Kafka och Postgres | – | Operatorer, konfiguration och drift | Applikationsteamen använder plattformens tjänster | – |
-| S3 som nås från alla siter (LAG-03) | Objektlagring med replikering mellan siter | Egen S3 i klustret. Kräver budget, hårdvara och kompetens som vi inte har idag | – | Loggar, backup och registry saknar en gemensam plats som tål sitebortfall |
-| Trafik in och ut per site (TRAF-01 till TRAF-04, TRAF-08) | BGP-peering, routing, brandväggar, proxy och lastbalanserare per site | Annonserar adresser för tjänster och pod-nät | – | Trafiken går via en primär site, som idag |
-| Gemensamma tjänster som överlever ett sitebortfall (GEM-01, GEM-02) | DNS, NTP, IdP och PKI aktiva i minst två siter, utan failover som måste lyckas | – | – | Ett bortfall av en site slår ut klustret även om klustret i sig klarar det |
-| Test av sitebortfall (SAM-02) | Deltar och testar sin del | Deltar och testar sin del | – | Vi vet inte om designen fungerar förrän det är skarpt läge |
-
-Vi har valt att inte erbjuda blocklagring som överlever ett sitebortfall. Data som måste finnas kvar läggs i en meddelandekö, en databas eller S3. Därför är S3 med replikering mellan siterna den viktigaste lagringstjänsten vi behöver från infrastrukturen, tillsammans med snabb lokal lagring. Om infrastrukturen inte levererar S3 måste plattformen göra det, och då behöver det finnas budget och resurser för det.
-
-## Prioritering
-
-Om allt inte kan levereras samtidigt är det här ordningen vi prioriterar i:
-
-1. Tre fullvärdiga siter med latens och bandbredd enligt SITE-01 till SITE-05, dimensionerade för två stretchade kluster (PLAT-05).
-2. Brandväggar mellan siterna som behandlar klustrets nodnät som en säkerhetszon och klarar MTU och failover utan att störa klustret, samt har regler och bandbredd för replikering mellan klustren (FW-01 till FW-03, FW-05).
-3. Aktiv/aktiv/aktiv för trafik in och ut och för gemensamma tjänster (TRAF-01 till TRAF-03, TRAF-05, TRAF-08, GEM-01, GEM-02).
-4. Snabb lokal lagring och S3 med replikering mellan siterna (LAG-01, LAG-03 till LAG-05).
-5. BGP, routade pod-nät och API-integration mot DNS, NSX och ACI (TRAF-04, TRAF-06, TRAF-07, FW-04, NSX-01 till NSX-03, ACI-01 till ACI-05).
-6. Stöd för både VCF och bare metal (PLAT-01 till PLAT-04). Helst ska infrastrukturen stödja båda, så att valet kan göras senare.
-
-Kraven på samarbete (SAM-01 till SAM-03) gäller från projektets start.
-
-## Öppna frågor till infraprojektet
-
-- [ ] Vilka siter är aktuella, och vilken latens och bandbredd blir det mellan dem?
-- [ ] Hur är brandväggarna tänkta att byggas, per site eller gemensamt, och klarar de asymmetriska flöden?
-- [ ] Vilken lagringslösning planeras för lokal lagring och S3, och vem äger respektive nivå?
-- [ ] Kommer bare metal att stödjas i nätdesignen fullt ut, eller bara VCF?
-- [ ] Finns det API:er i NSX som vi får använda för att synka grupper och taggar?
-- [ ] Om ACI väljs som underlay: blir det Multi-Pod eller Multi-Site, och hur stor del av nätet kan ett fel eller en uppgradering av APIC påverka?
-- [ ] Hur ser tidplanen ut, och när behöver projektet våra preliminära siffror bekräftade?
-- [ ] Vem levererar snabb lokal lagring per site, och i vilken form (lokala diskar eller lokal datastore)?
-- [ ] Vem levererar S3 med replikering mellan siterna? Om det blir plattformen, vilken budget och vilka resurser följer med?
-- [ ] Vilka av de gemensamma tjänsterna (DNS, NTP, IdP, PKI, proxy, backupmål) kommer att finnas i alla tre siter, och vilka inte?
-- [ ] Vem samordnar test av sitebortfall, och hur ofta ska det göras?
-
