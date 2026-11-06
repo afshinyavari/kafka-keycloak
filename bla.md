@@ -32,28 +32,29 @@ Konkret betyder det:
 
 ## Varför stretch över tre siter och inte ett kluster per site
 
-Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, främst Kafka, AMQP och Postgres (i framtiden kanske även NoSQL och cache). De hanteras av operatorer som är klusterbundna. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
+Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, till exempel meddelandeköer och databaser. De har två egenskaper som styr hela designen. De replikerar själva mellan sina instanser, synkront, och väljer ny ledare automatiskt om en instans försvinner. Och vi driftar dem med operatorer, som sköter installation, uppgradering, certifikat, konfiguration och återställning, men som är bundna till ett kluster. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
 
 ### Det naturliga alternativet: ett kluster per site
 
-Med ett kluster per site måste replikeringen mellan siterna ske mellan kluster. För Kafka betyder det i praktiken MirrorMaker 2 och för Postgres replica- eller standby-kluster. Båda är asynkrona och kräver att någon, en människa eller ett skript, bestämmer att den andra siten ska ta över. Vid ett sitebortfall förlorar vi då data som inte hunnit replikeras, och tjänsten är nere tills failovern är gjord. Eller att vi släpper operatorspåret och installerar dessa applikationer på ett mer traditionellt sätt och därmed tappar värdefulla egenskaper i drift och förvaltning.
+Med ett kluster per site finns två sätt att få en tjänst att överleva ett sitebortfall. Det ena är en instans per site med replikering mellan klustren. Den replikeringen är asynkron och kräver att någon, en människa eller ett skript, bestämmer att en annan site ska ta över. Vid ett sitebortfall förloras det som inte hunnit replikeras, och tjänsten är nere tills failovern är gjord. Det är precis den sortens failover som målbilden säger att vi inte ska vara beroende av. Det andra är att sprida en och samma instans över de tre klustren. Då fungerar ledarval och synkron replikering som i stretch, men operatorn kan inte användas, och tjänsten måste installeras och driftas för hand.
 
-I ett stretchat kluster ligger replikerna på olika siter men i samma kluster. Operatorerna eller applikationerna själv, väljer ny ledare automatiskt, och med synkron replikering förloras ingen bekräftad data.
+I ett stretchat kluster ligger replikerna på olika siter men i samma kluster. Tjänsten väljer ny ledare själv, med synkron replikering förloras ingen bekräftad data, och operatorn fungerar som vanligt.
 
-| Egenskap | Stretch över tre siter | Ett kluster per site |
-| --- | --- | --- |
-| Failover för Kafka och Postgres vid sitebortfall | Automatisk, sköts av operatorn (postgres) och Kraft (kafka) | Manuell eller skriptad promotion mellan kluster |
-| Dataförlust vid sitebortfall (RPO) | Ingen för bekräftade skrivningar | Det som inte hunnit replikeras asynkront |
-| Quorum (etcd, Kafka KRaft, Postgres) | Tre röster i tre felzoner | Quorum per site, inget gemensamt |
-| Skydd mot logiska fel (felaktig uppgradering, felkonfiguration) | Sämre, ett kluster påverkar alla siter | Bättre, felet stannar i en site |
-| Krav på nätet mellan siterna | Låg latens för synkron replikering, och klustertrafik genom brandvägg | Lägre latenskrav, men bara för att replikeringen är asynkron. Bara applikationstrafik genom brandvägg |
-| För nyttjarna | En plattform, spridning mellan siter sker automatiskt | Varje team måste själva hantera flera kluster |
+| Egenskap | Stretch över tre siter | Kluster per site, en instans per site med replikering mellan kluster | Kluster per site, en instans spridd över klustren utan operator |
+| --- | --- | --- | --- |
+| Ledarval vid sitebortfall | Automatiskt, inbyggt i tjänsten | Manuell eller skriptad failover mellan kluster | Automatiskt, inbyggt i tjänsten |
+| Dataförlust vid sitebortfall (RPO) | Ingen för bekräftade skrivningar | Det som inte hunnit replikeras asynkront | Ingen för bekräftade skrivningar |
+| Drift och livscykel | Operatorn sköter det | Operatorn i varje kluster, plus replikeringen som egen komponent | Manuellt. Operatorerna är bundna till ett kluster och kan inte användas när tjänsten är spridd över flera |
+| Quorum | Tre röster i tre felzoner | Quorum per site, inget gemensamt | Tre röster i tre felzoner, men över klustergränser |
+| Skydd mot logiska fel | Sämre, ett kluster påverkar alla siter | Bättre, felet stannar i en site | Bättre. Ett plattformsfel stannar i en site och tjänsten fortsätter på de två andra. Fel i tjänsten själv slår mot alla siter, men det gäller stretch också |
+| Krav på nätet mellan siterna | Låg latens, klustertrafik genom brandvägg | Lägre latenskrav, men bara för att replikeringen är asynkron | Samma latenskrav som stretch, och trafiken mellan instanserna måste routas mellan klustren |
+| För nyttjarna | En plattform, spridning sker automatiskt | Varje team hanterar flera kluster | Varje team hanterar flera kluster |
 
-Vi menar att ett kluster per site är ett rimligt val för tjänster som inte har state, men att det ger sämre tillgänglighet för de tjänster där kraven är högst.
+För stateful-tjänsterna står valet mellan sämre tillgänglighet med replikering mellan kluster, eller att ge upp operatorerna och drifta tjänsterna för hand. Stretch är det enda alternativet som ger både automatisk hantering av sitebortfall och drift via operatorer. Tjänster utan state skulle klara sig med ett kluster per site, men när vi ändå bygger stretch för de stateful kör vi allt där. Det ger en plattform och en klustertyp att förvalta i stället för flera.
 
 ### Varför tre siter och inte två
 
-Allt som bygger på quorum, alltså etcd, Kafka KRaft och Postgres med synkron replikering, behöver en majoritet för att fortsätta fungera. Med två siter kan ingen av dem avgöra om den andra är borta eller bara onåbar. Med tre fullvärdiga siter klarar vi bortfall av vilken site som helst. Det är också därför ett vittne utan egen routing inte räcker.
+Allt som bygger på quorum, alltså etcd och de stateful-tjänster som replikerar synkront, behöver en majoritet för att fortsätta fungera. Med två siter kan ingen av dem avgöra om den andra är borta eller bara onåbar. Med tre fullvärdiga siter klarar vi bortfall av vilken site som helst. Det är också därför ett vittne utan egen routing inte räcker.
 
 ### Var data som ska överleva ett sitebortfall ska ligga
 
@@ -111,8 +112,8 @@ Trafik mellan poddar på olika noder går inkapslad i Geneve-tunnlar (UDP 6081).
 | TRAF-01 | Trafik ut från klustret ska kunna lämna via den site där podden kör. | Undviker att all trafik går via "primärsiten". |
 | TRAF-02 | Inkommande trafik ska kunna tas emot på alla tre siter samtidigt. | Aktiv/aktiv/aktiv och inget beroende av failover. |
 | TRAF-03 | Brandväggar och routing ska klara att en session går in på en site och svaret ut på en annan, eller så ska designen garantera symmetriska flöden per site. | Stateful brandväggar per site utan state-synk är det vanligaste skalet till att aktiv/aktiv inte fungerar. |
-| TRAF-04 | Vi ska kunna peera BGP mot nätet i alla tre siter och annonsera adresser för tjänster, ingress och egress. | Ger oss ett standardgränssnitt som fungerar likadant på VCF och bare metal. |
-| TRAF-05 | Brandväggsregler och IP-planer ska acceptera källadresser från alla tre siter för samma tjänst. | Applikationer flyttar mellan siter och tar sina egress-adresser med sig. |
+| TRAF-04 | Vi ska kunna peera BGP mot nätet i alla tre siter och annonsera adresser för services, ingress och egress. | Ger oss ett standardgränssnitt som fungerar likadant på VCF och bare metal. |
+| TRAF-05 | Brandväggsregler och IP-planer ska acceptera källadresser från alla tre siter för samma applikation. | Applikationer flyttar mellan siter och tar sina egress-adresser med sig. |
 | TRAF-06 | Vi behöver API-åtkomst till DNS för de zoner vi använder, så att poster kan skapas automatiskt från klustret. | Styrning via DNS får inte bero på manuella ärenden. |
 | TRAF-07 | Om DNS-baserad lastbalansering (GSLB) används ska den ha hälsokontroller per site och korta TTL:er. | Annars pekar DNS på en site som inte svarar. |
 | TRAF-08 | Proxy för utgående trafik och lastbalanserare för inkommande trafik ska finnas i varje site. | De ligger i datavägen. En proxy eller lastbalanserare i en annan site gör att trafiken ändå går via den siten, oavsett TRAF-01 och TRAF-02. |
@@ -146,29 +147,21 @@ Vi vill erbjuda två nivåer: snabb lokal lagring och S3. Vi kör ingen egen mju
 | PLAT-02 | På VCF ska varje site motsvaras av ett eget vSphere-kluster som kan användas som en felzon i OpenShift. | OpenShift mappar zoner mot vSphere-kluster och datacenter. |
 | PLAT-03 | På bare metal ska det finnas fysiska nätanslutningar, out-of-band-hantering (BMC) och provisioneringsnät per site. | Krävs för att installera och hantera servrar utan virtualiseringslager. |
 | PLAT-04 | Vi ska ha tillgång till de API:er vi behöver för automatiserad installation och skalning (vCenter eller BMC). | Vi installerar och uppgraderar kluster automatiserat. |
-| PLAT-05 | Plattformen ska bestå av minst två stretchade produktionskluster. Infrastrukturen ska dimensioneras för det: nodnät, VIP:er, BGP-peers och pod-nät för båda klustren i varje site, och kapacitet för två uppsättningar control plane- och infra-noder per site. | Två kluster skyddar mot logiska fel som slår ut ett helt kluster, till exempel en misslyckad uppgradering. Se riskerna med stretch. |
+| PLAT-05 | Plattformen ska bestå av minst två stretchade produktionskluster. Infrastrukturen ska dimensioneras för det: nodnät, adresser för API och ingress, BGP-peers och pod-nät för båda klustren i varje site, och kapacitet för två uppsättningar control plane- och infra-noder per site. | Två kluster skyddar mot logiska fel som slår ut ett helt kluster, till exempel en misslyckad uppgradering. Se riskerna med stretch. |
 
-### Integration med NSX
+### Nätverksplattform: overlay och underlay
 
-Vi vill integrera med NSX, men vi vill inte ersätta OpenShifts eget nätverk (OVN-Kubernetes) med NSX. Det skulle göra oss beroende av en tredjepartsintegration med osäker framtid och support, och det fungerar inte om vi kör bare metal. Integrationen bör i stället ske i gränssnitten.
-
-| Id | Krav | Varför |
-| --- | --- | --- |
-| NSX-01 | BGP-peering mellan klustret och NSX eller den fysiska fabricen i alla siter (se TRAF-04). | Routing på lika villkor som övriga miljöer. |
-| NSX-02 | Vi ska via API kunna synka adresser och taggar (namespace, applikation, egress-IP) till grupper i NSX eller ACI (ESG). | Då kan brandväggsregler och mikrosegmentering i NSX eller ACI bygga på vår metadata. |
-| NSX-03 | Gemensam IPAM och namngivningskonvention för nät och taggar. | Undviker att vi och infra pratar om samma sak med olika namn. |
-
-### Om Cisco ACI används som underlay
-
-Vi har förstått att ACI är aktuellt som underlay. Vi har inget emot det, men några av ACI:s egenskaper påverkar våra krav direkt. Kraven nedan gäller om ACI väljs.
+Oavsett vilken nätverksplattform som väljs, i det fysiska nätet eller som overlay i virtualiseringsplattformen, vill vi att klustret och nätet integreras i gränssnitten: routing via BGP och säkerhetsgrupper via API. Vi vill inte ersätta OpenShifts eget nätverk (OVN-Kubernetes) med en integration från nät- eller virtualiseringsplattformen. Det skulle göra oss beroende av en tredjepartsintegration med osäker framtid och support, och det skulle inte fungera likadant på VCF och bare metal.
 
 | Id | Krav | Varför |
 | --- | --- | --- |
-| ACI-01 | Det ska vara dokumenterat vilka felzoner fabricen har och hur stor del av nätet ett fel eller en uppgradering av APIC kan påverka. Om Multi-Pod väljs ska riskerna med ett gemensamt kontrollplan för alla tre siter beskrivas. | Ett gemensamt kontrollplan är en gemensam felzon. Det är samma skäl som till att vi kör två kluster. |
-| ACI-02 | ACI används som underlay. OpenShift fortsätter att använda OVN-Kubernetes som nätverksplugin, inte ACI CNI. | Vi vill inte göra klustrets nätverk beroende av en tredjepartsintegration, och samma modell ska fungera på VCF och bare metal. |
-| ACI-03 | BGP-peering mot ACI i alla tre siter, till exempel med floating L3Out, dimensionerad för två kluster. Vilka noder som peerar, och om route reflectors används, bestäms tillsammans. | Antalet BGP-peers per border leaf är begränsat, och vi annonserar pod-nät enligt FW-04. |
-| ACI-04 | FW-01 genomförs i ACI genom att nodnäten i ett kluster ligger i samma EPG eller ESG, eller har ett contract som tillåter all trafik mellan noderna. Trafiken mellan noderna leds inte genom en brandvägg via service graph. | Samma skäl som för FW-01. |
-| ACI-05 | Bare metal-noder ska kunna anslutas direkt till ACI med L3 och BGP, utan NSX. | Undviker två overlay-lager och gör bare metal till ett fullvärdigt alternativ (PLAT-01). |
+| NÄT-01 | Klustrets eget nätverk (OVN-Kubernetes) ersätts inte av en integration från nät- eller virtualiseringsplattformen. | Tredjepartsintegrationer har osäker framtid och support, och samma modell ska fungera på VCF och bare metal. |
+| NÄT-02 | BGP-peering i alla tre siter, oavsett om motparten är en overlay-router eller den fysiska fabricen, dimensionerad för två kluster (se TRAF-04). Vilka noder som peerar, och om route reflectors används, bestäms tillsammans. | Många fabricer har gränser för antal grannar per switch, och vi annonserar pod-nät enligt FW-04. |
+| NÄT-03 | Nätets felzoner ska vara dokumenterade, inklusive hur stor del av nätet ett fel eller en uppgradering i kontrollplanet påverkar. Ett gemensamt kontrollplan över alla tre siter ska riskbedömas. | Ett gemensamt kontrollplan är en gemensam felzon. Det är samma skäl som till att vi kör två kluster. |
+| NÄT-04 | Designen ska visa hur FW-01 genomförs i vald plattform. Nodnäten i ett kluster får inte delas upp i segment eller grupper som kräver regler eller brandvägg sinsemellan. | FW-01 går lätt förlorat i översättningen till plattformens konfigurationsmodell. |
+| NÄT-05 | Säkerhetsgrupper i de lager som skriver brandväggsregler, både overlay och fabric, ska kunna fyllas via API med våra pod-nät och metadata (namespace, applikation). | Då kan mikrosegmentering bygga på vår metadata oavsett var regeln skrivs. |
+| NÄT-06 | Gemensam IPAM och namngivningskonvention för nät och grupper. | Undviker att vi och infra pratar om samma sak med olika namn. |
+| NÄT-07 | Bare metal ska kunna anslutas direkt till fabricen med L3 och BGP, utan overlay-lager från virtualiseringsplattformen. | Undviker två overlay-lager och gör bare metal till ett fullvärdigt alternativ (PLAT-01). |
 
 ### Samarbete och drift
 
