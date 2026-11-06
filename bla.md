@@ -32,7 +32,7 @@ Konkret betyder det:
 
 ## Varför stretch över tre siter och inte ett kluster per site
 
-Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, till exempel meddelandeköer och databaser. De har två egenskaper som styr hela designen. De replikerar själva mellan sina instanser, synkront, och väljer ny ledare automatiskt om en instans försvinner. Och vi driftar dem med operatorer, som sköter installation, uppgradering, certifikat, konfiguration och återställning, men som är bundna till ett kluster. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
+Vi kör stateful-tjänster med höga tillgänglighetskrav i OpenShift, till exempel meddelandeköer och databaser. De har två egenskaper som styr hela designen. De replikerar själva mellan sina instanser, synkront, och väljer ny ledare automatiskt om en instans försvinner. Dessa driftas med kubernetes-operatorer, som sköter installation, uppgradering, certifikat, konfiguration och återställning, men som är bundna till ett kluster. Det är huvudskälet till att vi vill ha ett kluster som sträcker sig över tre siter.
 
 ### Det naturliga alternativet: ett kluster per site
 
@@ -50,7 +50,7 @@ I ett stretchat kluster ligger replikerna på olika siter men i samma kluster. T
 | Krav på nätet mellan siterna | Låg latens, klustertrafik genom brandvägg | Lägre latenskrav, men bara för att replikeringen är asynkron | Samma latenskrav som stretch, och trafiken mellan instanserna måste routas mellan klustren |
 | För nyttjarna | En plattform, spridning sker automatiskt | Varje team hanterar flera kluster | Varje team hanterar flera kluster |
 
-För stateful-tjänsterna står valet mellan sämre tillgänglighet med replikering mellan kluster, eller att ge upp operatorerna och drifta tjänsterna för hand. Stretch är det enda alternativet som ger både automatisk hantering av sitebortfall och drift via operatorer. Tjänster utan state skulle klara sig med ett kluster per site, men när vi ändå bygger stretch för de stateful kör vi allt där. Det ger en plattform och en klustertyp att förvalta i stället för flera.
+För stateful-tjänsterna står valet mellan sämre tillgänglighet med replikering mellan kluster, eller att ge upp operatorerna och drifta tjänsterna för hand. Stretch är det enda alternativet som ger både automatisk hantering av sitebortfall och drift via operatorer. Tjänster utan state skulle klara sig med ett kluster per site, men när vi ändå bygger stretch för de som är stateful, blir det naturligt att köra även stateless där. Det ger en plattform och en klustertyp att förvalta i stället för flera.
 
 ### Varför tre siter och inte två
 
@@ -68,16 +68,16 @@ Meddelandeköerna och databaserna körs i klustret och ska ha snabb lokal lagrin
 
 ### Riskerna med stretch och hur vi hanterar dem
 
-Stretch skyddar mot fysiska fel men inte mot logiska. En misslyckad uppgradering eller en felkonfiguration påverkar alla tre siter samtidigt. Det hanterar vi så här:
+Stretch skyddar mot fysiska fel men inte mot logiska. En misslyckad uppgradering eller en felkonfiguration påverkar alla tre siter samtidigt. Det hanteras genom:
 
-1. En testmiljö som också är stretchad över tre siter, där uppgraderingar och ändringar körs först.
+1. Test- och staging-miljöer som också är stretchad över tre siter, där uppgraderingar och ändringar körs först.
 2. Backup av data till S3 utanför klustret.
 3. Två stretchade produktionskluster i stället för ett. Ett sitebortfall hanteras automatiskt inom varje kluster. Om ett helt kluster går sönder på grund av ett logiskt fel kan kritiska tjänster ta över i det andra, till exempel Kafka med MirrorMaker 2 eller Postgres med ett replica cluster. Den vägen är asynkron och kräver manuell failover, men behövs bara i det ovanliga fallet. Klustren uppgraderas och ändras aldrig samtidigt, och stateless-tjänster kan köra aktivt i båda bakom DNS.
 4. All konfiguration i Git, så att ett kluster går att bygga upp från grunden.
 
 Två kluster skyddar mot fel i ett kluster, men inte mot fel i det som båda delar såsom nät, brandväggar, DNS, IdP och S3. Det är en av anledningarna till att kraven på gemensamma tjänster (GEM-01 och GEM-02) är viktiga.
 
-Kravet på latens mellan siterna kommer inte från Kubernetes utan från tillgänglighetskravet på stateful tjänsterna. Kafka och Postgres som replikerar synkront över tre siter väntar på en rundtur per skrivning oavsett om de kör i OpenShift eller på virtuella maskiner. Det som är specifikt för ett stretchat kluster är trafiken mellan noderna, och det är därför kraven på brandväggar längre ner i dokumentet är så specifika.
+Kravet på latens mellan siterna kommer inte från Kubernetes utan från tillgänglighetskraven på stateful tjänsterna. Kafka och Postgres som replikerar synkront över tre siter väntar på en rundtur per skrivning oavsett om de kör i OpenShift eller på virtuella maskiner. Det som är specifikt för ett stretchat kluster är trafiken mellan noderna, och det är därför kraven på brandväggar längre ner i dokumentet är så specifika.
 
 ## Krav
 
@@ -111,7 +111,7 @@ Trafik mellan poddar på olika noder går inkapslad i Geneve-tunnlar (UDP 6081).
 | --- | --- | --- |
 | TRAF-01 | Trafik ut från klustret ska kunna lämna via den site där podden kör. | Undviker att all trafik går via "primärsiten". |
 | TRAF-02 | Inkommande trafik ska kunna tas emot på alla tre siter samtidigt. | Aktiv/aktiv/aktiv och inget beroende av failover. |
-| TRAF-03 | Brandväggar och routing ska klara att en session går in på en site och svaret ut på en annan, eller så ska designen garantera symmetriska flöden per site. | Stateful brandväggar per site utan state-synk är det vanligaste skalet till att aktiv/aktiv inte fungerar. |
+| TRAF-03 | Brandväggar och routing ska klara att en session går in på en site och svaret ut på en annan, eller så ska designen garantera symmetriska flöden per site. | Stateful brandväggar per site utan state-synk är en vanlig anledning till att aktiv/aktiv/aktiv inte fungerar. |
 | TRAF-04 | Vi ska kunna peera BGP mot nätet i alla tre siter och annonsera adresser för services, ingress och egress. | Ger oss ett standardgränssnitt som fungerar likadant på VCF och bare metal. |
 | TRAF-05 | Brandväggsregler och IP-planer ska acceptera källadresser från alla tre siter för samma applikation. | Applikationer flyttar mellan siter och tar sina egress-adresser med sig. |
 | TRAF-06 | Vi behöver API-åtkomst till DNS för de zoner vi använder, så att poster kan skapas automatiskt från klustret. | Styrning via DNS får inte bero på manuella ärenden. |
@@ -120,7 +120,7 @@ Trafik mellan poddar på olika noder går inkapslad i Geneve-tunnlar (UDP 6081).
 
 ### Gemensamma tjänster
 
-Klustret överlever bara om två av tre siter finns kvar. En tjänst som finns aktiv i två siter nås därför alltid från minst en av de siter som är kvar. Vi kräver inte att varje stödtjänst finns i alla tre siter, men vi kräver att den fortsätter svara utan att något behöver flyttas. Proxy och lastbalanserare ligger i datavägen och hanteras under trafik (TRAF-08). Backupmål och registry ligger i S3 och hanteras under lagring (LAG-03).
+Klustret överlever bara om två av tre siter finns kvar. En tjänst som finns aktiv i två siter nås därför alltid från minst en av de siter som är kvar. Vi kräver inte att varje stödtjänst finns i alla tre siter, men vi kräver att den fortsätter svara utan att något behöver flyttas.
 
 | Id | Krav | Varför |
 | --- | --- | --- |
@@ -129,14 +129,14 @@ Klustret överlever bara om två av tre siter finns kvar. En tjänst som finns a
 
 ### Lagring
 
-Vi vill erbjuda två nivåer: snabb lokal lagring och S3. Vi kör ingen egen mjukvarudefinierad lagring i klustret, så S3 behöver levereras av infrastrukturen.
+Vi vill erbjuda två nivåer (Afshin: långsam NFS skulle också kunna vara ett tredje alternativ), snabb lokal lagring och S3. Vi kör ingen egen mjukvarudefinierad lagring i klustret, så S3 behöver levereras av infrastrukturen.
 
 | Id | Krav | Varför |
 | --- | --- | --- |
 | LAG-01 | Snabb lokal lagring per nod eller per site (NVMe eller motsvarande) med låg latens. Ingen replikering krävs, applikationen ansvarar själv för sin redundans. | Våra viktigaste stateful-tjänster, som Kafka och Postgres, replikerar själva mellan siterna. Replikerad lagring under dem ger dubbel replikering och längre svarstider utan att höja tillgängligheten. Det här är vår viktigaste lagringsnivå. |
 | LAG-02 | Utgår. Vi ställer inget krav på blocklagring som överlever ett sitebortfall. | Data som ska överleva ett sitebortfall läggs i en meddelandekö, en databas eller S3. Se avsnittet om var data som ska överleva ett sitebortfall ska ligga. |
 | LAG-03 | S3-kompatibel objektlagring som nås från alla tre siter och klarar bortfall av en site. Vi behöver veta om replikeringen är synkron eller asynkron. Backup från de två klustren ska kunna ligga i separata buckets med separata behörigheter. | Den vanligaste lagringsformen för nya applikationer, och krävs för loggar, backup och registry. |
-| LAG-04 | Block- och fillagring ska levereras via en CSI-drivrutin som är certifierad för OpenShift och stöder topologi (zoner), snapshots och volymexpansion. | Topologistöd krävs för att poddar ska hamna där deras data finns. |
+| LAG-04 | Block- och fillagring ska levereras via en CSI-drivrutin som är certifierad för OpenShift och stöder topologi (zoner), snapshots (Afshin: varför behövs snapshots?) och volymexpansion. | Topologistöd krävs för att poddar ska hamna där deras data finns. |
 | LAG-05 | Varje nivå ska ha angiven prestanda (IOPS, latens), RPO/RTO och en kapacitetsplan. | Vi måste kunna berätta för nyttjarna vad de får. |
 
 ### Plattform: VCF eller bare metal
