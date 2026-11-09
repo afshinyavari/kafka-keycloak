@@ -129,15 +129,16 @@ Klustret överlever bara om två av tre siter finns kvar. En tjänst som finns a
 
 ### Lagring
 
-Vi vill erbjuda två nivåer (Afshin: långsam NFS skulle också kunna vara ett tredje alternativ), snabb lokal lagring och S3. Vi kör ingen egen mjukvarudefinierad lagring i klustret, så S3 behöver levereras av infrastrukturen.
+Vi vill erbjuda tre nivåer: snabb lokal lagring, S3 och enklare delad fillagring (NFS) från den NAS som finns idag. De två första är de viktigaste. Vi kör ingen egen mjukvarudefinierad lagring i klustret, så S3 och fillagring behöver levereras av infrastrukturen.
 
 | Id | Krav | Varför |
 | --- | --- | --- |
 | LAG-01 | Snabb lokal lagring per nod eller per site (NVMe eller motsvarande) med låg latens. Ingen replikering krävs, applikationen ansvarar själv för sin redundans. | Våra viktigaste stateful-tjänster, som Kafka och Postgres, replikerar själva mellan siterna. Replikerad lagring under dem ger dubbel replikering och längre svarstider utan att höja tillgängligheten. Det här är vår viktigaste lagringsnivå. |
 | LAG-02 | Utgår. Vi ställer inget krav på blocklagring som överlever ett sitebortfall. | Data som ska överleva ett sitebortfall läggs i en meddelandekö, en databas eller S3. Se avsnittet om var data som ska överleva ett sitebortfall ska ligga. |
 | LAG-03 | S3-kompatibel objektlagring som nås från alla tre siter och klarar bortfall av en site. Vi behöver veta om replikeringen är synkron eller asynkron. Backup från de två klustren ska kunna ligga i separata buckets med separata behörigheter. | Den vanligaste lagringsformen för nya applikationer, och krävs för loggar, backup och registry. |
-| LAG-04 | Block- och fillagring ska levereras via en CSI-drivrutin som är certifierad för OpenShift och stöder topologi (zoner), snapshots (Afshin: varför behövs snapshots?) och volymexpansion. | Topologistöd krävs för att poddar ska hamna där deras data finns. |
+| LAG-04 | Block- och fillagring ska levereras via en CSI-drivrutin som är certifierad för OpenShift och stöder topologi (zoner) och volymexpansion. | Topologistöd krävs för att poddar ska hamna där deras data finns. Volymer måste kunna växa utan att data flyttas. |
 | LAG-05 | Varje nivå ska ha angiven prestanda (IOPS, latens), RPO/RTO och en kapacitetsplan. | Vi måste kunna berätta för nyttjarna vad de får. |
+| LAG-06 | Delad fillagring (NFS eller motsvarande) för volymer som flera poddar behöver montera samtidigt, levererad per site från den NAS som redan finns. Lägre prestanda än LAG-01 är godtagbart. Fillagringen behöver inte överleva ett sitebortfall, men varje volym ska vara knuten till en site via topologi (LAG-04) så att poddarna körs i samma site som sin volym. | Vissa applikationer behöver ett gemensamt filsystem, till exempel för uppladdade filer eller äldre applikationer som inte kan använda S3. Med site-bunden lagring går det att använda det som redan finns, och utan montering över länken mellan siterna. Den här nivån är inte avsedd för databaser eller Kafka. |
 
 ### Plattform: VCF eller bare metal
 
